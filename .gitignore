@@ -1,0 +1,26 @@
+# --- Datos de clientes: NUNCA al repositorio (datos bancarios de terceros) ---
+parser/tests/fixtures/
+*.pdf
+*.xls
+*.xlsx
+*.csv
+salidas/
+
+# --- Secretos ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# --- Node / Next.js (web/ tiene su propio .gitignore además) ---
+node_modules/
+.next/
+*.tsbuildinfo
+
+.DS_Store

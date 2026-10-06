@@ -1,0 +1,24 @@
+[project]
+name = "cvp-parser"
+version = "0.1.0"
+description = "Lectura, cuadre y exportación de estados de cuenta bancarios (CVP Contable)"
+requires-python = ">=3.11"
+dependencies = [
+    "pdfplumber>=0.11",
+    "openpyxl>=3.1",
+    "xlrd>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["cvp_parser"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
