@@ -61,11 +61,14 @@ export default async function DetalleCliente({ params, searchParams }: PageProps
             ) : (
               <ul>
                 {pers.map((p) => (
-                  <li key={p.id} className="flex items-center justify-between border-b border-linea/70 px-4 py-2.5 text-sm last:border-b-0">
-                    <span>{MESES[p.mes - 1]} {p.anio}</span>
-                    <span className={`insignia ${p.estado === "cerrado" ? "bg-acento-suave text-acento" : "bg-aviso-suave text-aviso"}`}>
-                      {p.estado}
-                    </span>
+                  <li key={p.id} className="border-b border-linea/70 last:border-b-0">
+                    <Link href={`/clientes/${c.id}/periodos/${p.id}`}
+                      className="flex items-center justify-between px-4 py-2.5 text-sm hover:bg-acento-suave/50">
+                      <span className="font-medium">{MESES[p.mes - 1]} {p.anio}</span>
+                      <span className={`insignia ${p.estado === "cerrado" ? "bg-acento-suave text-acento" : "bg-aviso-suave text-aviso"}`}>
+                        {p.estado}
+                      </span>
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -79,9 +82,7 @@ export default async function DetalleCliente({ params, searchParams }: PageProps
               <button className="boton">Crear</button>
             </form>
           </div>
-          <p className="mt-2 text-xs text-tenue">
-            La carga de archivos y el procesamiento por período llegan en el paso 2.
-          </p>
+          <p className="mt-2 text-xs text-tenue">Entra a un período para subir sus archivos y procesarlo.</p>
         </section>
 
         {/* ------------------------------------------------ cuentas */}

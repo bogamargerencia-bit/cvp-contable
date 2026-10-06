@@ -8,8 +8,8 @@ revisión de los analistas. **Uso exclusivo del personal de CVP (admin + 4 anali
 | `parser/` | Paquete Python `cvp_parser`: lectores de bancos, cuadre, conciliación, caja, divisas, Excel de revisión | Listo (87 pruebas) |
 | `supabase/migrations/` | Esquema Postgres, RLS, auditoría, storage privado | Aplicado al proyecto `cvp-contable` |
 | `supabase/pruebas/rls.sql` | Prueba de permisos (no deja datos) | 14/14 OK |
-| `web/` | Next.js 16 (App Router) en Vercel: login, roles, clientes, cuentas, períodos, usuarios | Paso 1 listo |
-| `servicio/` | FastAPI que envuelve al parser (Railway) | Paso 2 — pendiente |
+| `web/` | Next.js 16 (App Router) en Vercel: login, roles, clientes, cuentas, períodos, usuarios, subida de archivos, corridas | Pasos 1 y 2 |
+| `servicio/` | FastAPI que envuelve al parser (Railway, `railway.json` + `servicio/Dockerfile`) | Paso 2 |
 
 ## Reglas que no se negocian
 
@@ -60,6 +60,7 @@ cd web && cp .env.example .env.local   # completar SUPABASE_SECRET_KEY
 npm install && npm run dev             # http://localhost:3000
 
 cd parser && pip install -e . && pytest
+pip install ./parser -r servicio/requirements.txt && python -m pytest servicio/tests
 ```
 
 ## Migraciones
@@ -71,3 +72,4 @@ cd parser && pip install -e . && pytest
 | `…0003_funciones_privadas_e_indices` | Funciones de acceso en el esquema `privado` (fuera de la API), índices de claves foráneas | Aplicada |
 | `…0004_politicas_sin_duplicados` | Separa las políticas «admin para todo» por acción (solo rendimiento) | **Pendiente**: requiere confirmar `drop policy` |
 | `…0005_perfiles_inactivos_por_defecto` | Perfiles nuevos inactivos | Aplicada |
+| `…0006_archivo_revision` | Tipo de archivo «revision» (Excel con decisiones) | Aplicada |
