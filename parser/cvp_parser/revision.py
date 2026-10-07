@@ -31,7 +31,7 @@ import openpyxl
 from .conciliacion import EstadoPartida as EP
 from .conciliacion_caja import EstadoCaja
 from .cuadre import Estado
-from .diagnostico import (Explicacion, diagnosticar, explicar_caja_dia, explicar_diferencia_monto, explicar_grupo,
+from .diagnostico import (Explicacion, diagnosticar, explicar_caja_dia, explicar_diferencia_monto, explicar_divisa_fecha, explicar_grupo,
                           explicar_libro_sin_entradas, explicar_mov_suelto, explicar_otro_banco, explicar_pareja,
                           explicar_solo_libro, generico)
 from .naturaleza import E_TRANSF, E_TRASLADO, OTROS, S_IMPUESTOS, S_PAGO_MOVIL, S_TRANSF, S_TRASLADO
@@ -254,6 +254,8 @@ def pendientes(rep: ReporteCliente) -> list[Pendiente]:
         for d in r.dias_con_diferencia:
             agregar(n, "Caja", "Divisas: ventas del día ≠ Kardex", d.fecha, n, None, d.diferencia,
                     f"Ventas US$ {d.ventas} · Kardex US$ {d.kardex}. {d.nota}".strip(), "Justificado / Corregido")
+        # Pares con el mismo monto fuera de ±días: se explican juntos (fila del Kardex → asiento).
+        pares = {p.pista.fila: r.libro.asientos[p.asientos[0]] for p in r.partidas if p.pista and p.asientos}
         for p in r.partidas:
             if p.estado in ("Conciliado", "Conciliado (agrupado)"):
                 continue
@@ -261,10 +263,14 @@ def pendientes(rep: ReporteCliente) -> list[Pendiente]:
                 a = r.libro.asientos[p.asientos[0]]
                 agregar(n, "Libro", f"Divisas: {p.estado.lower()}", a.fecha, a.descripcion, None,
                         a.debito_usd - a.credito_usd, p.nota,
-                        "Aceptar" if p.estado.startswith("Incluido") else "Corregido / Justificado")
+                        "Aceptar" if p.estado.startswith("Incluido") else "Corregido / Justificado",
+                        exp=explicar_divisa_fecha(n, a, p.pista, "libro") if p.pista else None)
             for k in p.kardex:
+                a = pares.get(k.fila)
                 agregar(n, "Caja", "Divisas: solo en Kardex", k.fecha, k.descripcion, None, k.monto,
-                        f"Kardex fila {k.fila}", "Corregido en el sistema / Justificado")
+                        f"Kardex fila {k.fila}" + (f" · posible: libro {a.fecha:%d/%m} {a.descripcion}" if a else ""),
+                        "Corregido en el sistema / Justificado",
+                        exp=explicar_divisa_fecha(n, a, k, "kardex") if a else None)
         for nombre_s, (lib, kx) in (("inicial", r.saldo_ini), ("final", r.saldo_fin)):
             if kx is not None and lib != kx:
                 agregar(n, "Libro", f"Divisas: saldo {nombre_s} libro ≠ Kardex", None, n, None, lib - kx,

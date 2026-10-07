@@ -467,3 +467,16 @@ def explicar_grupo(nat: str, estado: str, movs: list[Movimiento]) -> Explicacion
     return Explicacion(f"{len(movs)} movimientos de «{nat}» que el banco tiene y el libro no. Movimientos: {lista}.",
                        "Registrar los asientos en el sistema (o justificar indicando dónde están registrados).",
                        "Corregido en el sistema")
+
+
+def explicar_divisa_fecha(cuenta: str, a, k, lado: str) -> Explicacion:
+    """Mismo monto en el libro de divisas y en el Kardex, pero con fechas a más de ±3 días."""
+    dias = abs((a.fecha - k.fecha).days)
+    texto = (f"Es la misma operación en los dos registros, con fechas distintas: el libro de {cuenta} tiene el "
+             f"{a.fecha:%d/%m} «{a.descripcion}» por US$ {bs(abs(a.debito_usd - a.credito_usd))} y el Kardex (fila "
+             f"{k.fila}) tiene el {k.fecha:%d/%m} «{k.descripcion}» por US$ {bs(abs(k.monto))}: {dias} días de diferencia. "
+             "La app solo los empareja sola si están a ±3 días.")
+    hacer = ("Verificar la fecha real de la operación y corregir la fecha en el libro o en el Kardex. Si las dos "
+             "fechas son correctas, «Justificado» indicando la diferencia. Decide igual esta partida y la del "
+             + ("Kardex" if lado == "libro" else "libro") + ".")
+    return Explicacion(texto, hacer, "Justificado")

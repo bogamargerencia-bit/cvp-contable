@@ -59,6 +59,7 @@ class PartidaDivisa:
     asientos: list[int] = field(default_factory=list)
     kardex: list[MovKardex] = field(default_factory=list)
     nota: str = ""
+    pista: Optional[MovKardex] = None  # «Solo en libro»: mismo monto en el Kardex, pero fuera de ±días
 
 
 @dataclass
@@ -190,7 +191,7 @@ def conciliar_cuenta(cta: CuentaDivisa, libro: LibroBanco, ventas: Optional[dict
         pista = next((k for k in libres_k if k.monto == _signo(a)), None)
         partidas.append(PartidaDivisa("Solo en libro", [j], [],
                                       f"Posible: Kardex fila {pista.fila} {pista.fecha:%d/%m} {pista.descripcion} "
-                                      f"(fuera de ±{dias_tol} días)" if pista else ""))
+                                      f"(fuera de ±{dias_tol} días)" if pista else "", pista=pista))
     for k in libres_k:
         partidas.append(PartidaDivisa("Solo en Kardex", [], [k], ""))
 
