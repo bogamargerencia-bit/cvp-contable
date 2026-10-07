@@ -103,6 +103,8 @@ def procesar_cliente(cliente: str, periodo: str,
             alertas.append(f"{b}: el estado de cuenta NO cuadra ({len(c.diferencias)} diferencias).")
         for d in libros[b].diferencias_saldo:
             alertas.append(f"{b}: el saldo del export del sistema no es consistente → {d}")
+        for x in libros[b].avisos:
+            alertas.append(f"{b}: {x}")
     rep = ReporteCliente(cliente, periodo, list(extractos), cuadres, libros, clasificados, conc, alertas, caja)
     if libros_divisas:
         _divisas(rep, libros_divisas, kardex, cierre_caja)

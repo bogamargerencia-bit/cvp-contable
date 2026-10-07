@@ -64,6 +64,7 @@ class LibroBanco:
     saldo_final_usd: Decimal
     diferencias_saldo: list[str] = field(default_factory=list)
     filas_ignoradas: list[str] = field(default_factory=list)
+    avisos: list[str] = field(default_factory=list)     # limitaciones del export (p. ej. sin saldos)
 
 
 _COMPONENTE = re.compile(r"\d[\d.,]*\d")
@@ -119,19 +120,87 @@ def _es_ref_bancaria(v: object) -> bool:
     return False
 
 
+REPORTE = {"codcta", "nombre", "compro", "comentario", "fechatrans", "debitos", "creditos bs", "creditos $"}
+
+
+def _celdas(ruta: Path) -> list[list]:
+    """Todas las celdas de la primera hoja (fechas como datetime.date cuando la celda es fecha)."""
+    if ruta.suffix.lower() == ".xlsx":
+        import openpyxl
+        ws = openpyxl.load_workbook(str(ruta), data_only=True).worksheets[0]
+        return [[(c.date() if isinstance(c, dt.datetime) else ("" if c is None else c)) for c in row]
+                for row in ws.iter_rows(values_only=True)]
+    wb = xlrd.open_workbook(str(ruta))
+    sh = wb.sheet_by_index(0)
+    return [[xlrd.xldate_as_datetime(sh.cell_value(r, c), wb.datemode).date()
+             if sh.cell_type(r, c) == xlrd.XL_CELL_DATE else sh.cell_value(r, c) for c in range(sh.ncols)]
+            for r in range(sh.nrows)]
+
+
+def _leer_reporte(ruta: Path, filas: list[list], f_enc: int) -> LibroBanco:
+    """Export «reporte» (CACAO, septiembre 2026):
+    codcta | nombre | compro | comentario | fechatrans | [fechacomp] | debitos | creditos BS | creditos $
+    - Una fila inicial sin comprobante y en cero (apertura); no trae saldos.
+    - creditos BS / creditos $ = salida del banco en Bs. y su equivalente en US$.
+    - «debitos» no trae columna en US$: si viniera con montos no se puede interpretar y se informa.
+    """
+    col = {str(c).strip().lower(): i for i, c in enumerate(filas[f_enc])}
+    asientos: list[AsientoLibro] = []
+    ignoradas: list[str] = []
+    for r in range(f_enc + 1, len(filas)):
+        v = filas[r] + [""] * (len(col) - len(filas[r]))
+        g = lambda k: v[col[k]]
+        if not any(str(c).strip() for c in v):
+            continue
+        fecha = g("fechatrans")
+        comp = str(g("compro")).strip()
+        if not isinstance(fecha, dt.date):
+            ignoradas.append(f"fila {r + 1}: sin fecha → {[c for c in v if c != '']}")
+            continue
+        deb = monto_excel(g("debitos") or 0)
+        cre_bs = monto_excel(g("creditos bs") or 0)
+        cre_usd = monto_excel(g("creditos $") or 0)
+        if not comp and not deb and not cre_bs and not cre_usd:
+            continue                                   # fila de apertura en cero
+        if deb:
+            raise ValueError(f"{ruta.name}, fila {r + 1}: el reporte trae un débito (entrada) de {deb} sin su "
+                             "equivalente en US$; exporta el Mayor Analítico de la cuenta para procesarlo.")
+        asientos.append(AsientoLibro(
+            fila=r + 1, fecha=fecha, comprobante=comp, referencia=f"{cre_bs}", descripcion=str(g("comentario")).strip(),
+            debito_usd=CERO, credito_usd=cre_usd, saldo_usd=None, monto_bs=cre_bs or None,
+        ))
+    total = sum((a.credito_usd for a in asientos), CERO)
+    avisos = ["El libro viene en el formato «reporte», que no trae saldos: no se pueden verificar el saldo "
+              "inicial ni el final del sistema."]
+    if not any(a.debito_usd for a in asientos):
+        avisos.append("El libro no trae ninguna entrada (débitos), solo salidas: todas las entradas del banco "
+                      "quedarán «solo en banco». ¿Falta registrar los asientos de ventas o se exportó solo egresos?")
+    return LibroBanco(archivo=ruta.name, asientos=asientos, saldo_inicial_usd=CERO, saldo_final_usd=-total,
+                      filas_ignoradas=ignoradas, avisos=avisos)
+
+
 def leer_libro(ruta: Path) -> LibroBanco:
-    """Lee el libro de bancos. Dos presentaciones del mismo sistema:
+    """Lee el libro de bancos. Tres presentaciones del mismo sistema:
+    - «reporte» (CACAO sept. 2026): codcta/nombre/compro/comentario/fechatrans/…/creditos BS/creditos $;
     - export simple (WEI REST): encabezado en la fila 1 y una fila por asiento;
     - Mayor Analítico completo (CACAO): bloque de empresa, línea «Cuenta: … Saldo Anterior: x»,
       encabezado repetido por página, descripciones que siguen en la línea siguiente,
       «Sub Total:» y «Totales:». Se usa el Saldo Anterior impreso y se verifican los Totales.
     """
     ruta = Path(ruta)
+    with open(ruta, "rb") as fh:
+        if fh.read(5) == b"%PDF-":
+            raise ValueError(f"{ruta.name}: es un PDF con extensión de Excel; sube el export en Excel del sistema.")
+    celdas = _celdas(ruta)
+    f_rep = next((i for i, v in enumerate(celdas[:10]) if REPORTE <= {str(c).strip().lower() for c in v}), None)
+    if f_rep is not None:
+        return _leer_reporte(ruta, celdas, f_rep)
     filas = _filas(ruta)
     try:
         f_enc = next(i for i, v in enumerate(filas[:40]) if [str(c).strip() for c in v] == ENCABEZADO)
     except StopIteration:
-        raise ValueError(f"{ruta.name}: no se encontró el encabezado {ENCABEZADO}")
+        raise ValueError(f"{ruta.name}: no tiene un formato de libro conocido (Mayor Analítico, export simple "
+                         f"o «reporte»). Encabezado esperado: {ENCABEZADO}")
 
     asientos: list[AsientoLibro] = []
     ignoradas: list[str] = []
