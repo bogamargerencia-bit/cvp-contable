@@ -18,7 +18,8 @@ class FakeSB:
     """Imita lo que usa procesar_corrida: tablas en memoria, storage en un dict."""
 
     def __init__(self):
-        self.t = {k: [] for k in ("clientes", "periodos", "cuentas", "archivos", "corridas", "partidas")}
+        self.t = {k: [] for k in ("clientes", "periodos", "cuentas", "archivos", "corridas", "partidas",
+                                  "decisiones", "correcciones_caja", "perfiles")}
         self.storage: dict[str, bytes] = {}
 
     @staticmethod
@@ -30,6 +31,8 @@ class FakeSB:
             if op == "eq" and str(fila.get(k)) != val:
                 return False
             if op == "is" and fila.get(k) is not (val == "true"):
+                return False
+            if op == "in" and str(fila.get(k)) not in val.strip("()").split(","):
                 return False
         return True
 
@@ -56,7 +59,10 @@ class FakeSB:
         return bool(n)
 
     def insert(self, tabla, filas):
-        self.t[tabla].extend(filas)
+        for f in filas:
+            if tabla == "decisiones":            # valores por defecto de Postgres
+                f = {"vigente": True, "decidido_en": "2026-10-08T00:00:00+00:00", **f}
+            self.t[tabla].append(f)
 
     def descargar(self, ruta):
         return self.storage[ruta]
@@ -202,3 +208,99 @@ def test_cacao_con_revision_anterior(tmp_path):
     assert r2["resumen"]["corrida_revision"] == 2 and r2["resumen"]["uso"]["revision"] is True
     # Sin decisiones en el Excel: todo sigue abierto como «Sin decisión».
     assert set(r2["resumen"]["situaciones"]) == {"Sin decisión"}
+
+
+def _decidir(sb, p, corrida, codigo, decision, comentario="", quien="u-analista", cuando="2026-10-07T12:00:00+00:00"):
+    """Lo que hace la función registrar_decision de la web: la anterior deja de ser vigente."""
+    for d in sb.t["decisiones"]:
+        if d["codigo"] == codigo and d["vigente"]:
+            d["vigente"] = False
+    sb.t["decisiones"].append({"periodo_id": p["id"], "codigo": codigo, "decision": decision,
+                               "comentario": comentario or None, "revisado_por": quien, "decidido_en": cuando,
+                               "corrida_id": corrida["id"], "vigente": True})
+
+
+def _cacao(sb):
+    c, p = sb.cliente("CACAO COFFEE NG, C.A.", "CACAO")
+    for banco, edo, libro in [("BANPLUS", "edo_banplus.xls", "sistema_banplus.xls"),
+                              ("PLAZA", "edo_plaza.pdf", "sistema_plaza.xls")]:
+        k = sb.cuenta(c, banco, banco=banco)
+        sb.archivo(p, CACAO / edo, "estado_cuenta", k)
+        sb.archivo(p, CACAO / libro, "libro_sistema", k)
+    sb.archivo(p, CACAO / "ventas.xlsx", "cierre_caja")
+    sb.t["perfiles"].append({"id": "u-analista", "nombre": "Margareth Celis", "email": "m@x.test"})
+    return c, p
+
+
+@pytest.mark.skipif(not (CACAO / "ventas.xlsx").exists(), reason="faltan los archivos reales de CACAO")
+def test_decisiones_en_linea():
+    """Corrida 1 → decisiones en la web (sin Excel) → corrida 2 las aplica; la corrección de caja aceptada
+    se guarda y se sigue aplicando en la corrida 3."""
+    sb = FakeSB()
+    c, p = _cacao(sb)
+    r1 = sb.corrida(p, 1)
+    procesar_corrida(sb, r1["id"])
+    assert r1["estado"] == "lista", r1.get("error")
+    ps = [x for x in sb.t["partidas"] if x["corrida_id"] == r1["id"]]
+    prop = next(x for x in ps if x["propuesta"])
+    otras = [x for x in ps if not x["propuesta"]][:3]
+    _decidir(sb, p, r1, prop["codigo"], "Aceptar")
+    _decidir(sb, p, r1, otras[0]["codigo"], "Justificado", "Verificado con el banco")
+    _decidir(sb, p, r1, otras[1]["codigo"], "Justificado")          # sin comentario: queda incompleta
+    r2 = sb.corrida(p, 2)
+    r2["creada_por"] = "u-analista"
+    procesar_corrida(sb, r2["id"])
+    assert r2["estado"] == "lista", r2.get("error")
+    p2 = {x["codigo"]: x for x in sb.t["partidas"] if x["corrida_id"] == r2["id"]}
+    assert prop["codigo"] not in p2                       # la fecha se corrigió: la propuesta desaparece
+    assert p2[otras[0]["codigo"]]["situacion"] == "Cerrado"
+    assert p2[otras[1]["codigo"]]["situacion"] == "Decisión incompleta"
+    assert "comentario" in p2[otras[1]["codigo"]]["aviso"]
+    assert p2[otras[2]["codigo"]]["situacion"] == "Sin decisión"
+    [corr] = sb.t["correcciones_caja"]
+    assert corr["fila"] == prop["propuesta"]["fila"] and corr["fecha_nueva"] == prop["propuesta"]["fecha"]
+    assert corr["codigo"] == prop["codigo"] and corr["aceptada_por"] == "u-analista"
+    hist = r2["resumen"]["historial"]
+    assert any(h[2] == otras[0]["codigo"] and h[7] == "Margareth Celis" for h in hist)
+    # Corrida 3: la corrección sigue aplicada (viene de la base) y el historial se conserva.
+    r3 = sb.corrida(p, 3)
+    procesar_corrida(sb, r3["id"])
+    assert r3["estado"] == "lista", r3.get("error")
+    p3 = {x["codigo"]: x for x in sb.t["partidas"] if x["corrida_id"] == r3["id"]}
+    assert prop["codigo"] not in p3 and p3[otras[0]["codigo"]]["situacion"] == "Cerrado"
+    assert len(sb.t["correcciones_caja"]) == 1
+    assert len(r3["resumen"]["historial"]) >= len(hist)
+
+
+@pytest.mark.skipif(not (CACAO / "ventas.xlsx").exists(), reason="faltan los archivos reales de CACAO")
+def test_excel_y_web_gana_lo_mas_reciente(tmp_path):
+    import openpyxl
+    sb = FakeSB()
+    c, p = _cacao(sb)
+    r1 = sb.corrida(p, 1)
+    procesar_corrida(sb, r1["id"])
+    ps = [x for x in sb.t["partidas"] if x["corrida_id"] == r1["id"] and not x["propuesta"]]
+    a, b = ps[0]["codigo"], ps[1]["codigo"]
+    # En la web: «a» antes de subir el Excel, «b» después.
+    _decidir(sb, p, r1, a, "Justificado", "web antes", cuando="2026-10-06T09:00:00+00:00")
+    _decidir(sb, p, r1, b, "Justificado", "web después", cuando="2026-10-07T23:00:00+00:00")
+    wb = openpyxl.load_workbook(__import__("io").BytesIO(sb.storage[r1["excel_path"]]))
+    ws = wb["Revisión"]
+    fila_enc = next(r for r in range(1, 40) if ws.cell(r, 1).value == "Código")
+    enc = {ws.cell(fila_enc, k).value: k for k in range(1, ws.max_column + 1)}
+    for r in range(fila_enc + 1, ws.max_row + 1):
+        if ws.cell(r, 1).value in (a, b):
+            ws.cell(r, enc["Decisión"], "Justificado")
+            ws.cell(r, enc["Comentario"], "excel")
+            ws.cell(r, enc["Revisado por"], "MC")
+    ruta = tmp_path / "rev.xlsx"
+    wb.save(ruta)
+    arch = sb.archivo(p, ruta, "revision")
+    arch["subido_en"], arch["subido_por"] = "2026-10-07T10:00:00+00:00", "u-analista"
+    r2 = sb.corrida(p, 2)
+    procesar_corrida(sb, r2["id"])
+    assert r2["estado"] == "lista", r2.get("error")
+    vig = {d["codigo"]: d for d in sb.t["decisiones"] if d["vigente"]}
+    assert vig[a]["comentario"] == "excel"            # el Excel es más reciente que la decisión en la web
+    assert vig[b]["comentario"] == "web después"      # la web es más reciente que el Excel
+    assert len([d for d in sb.t["decisiones"] if d["codigo"] == a]) == 2

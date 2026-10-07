@@ -87,6 +87,7 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
   const archivo = (tipo: string, cuentaId: string | null) =>
     archivos.filter((a) => a.tipo === tipo && a.cuenta_id === cuentaId).sort((a, b) => b.subido_en.localeCompare(a.subido_en))[0];
 
+  const ultimaLista = corridas.find((c) => c.estado === "lista");
   const bancos = cuentas.filter((c) => c.tipo === "banco");
   const divisas = cuentas.filter((c) => c.tipo === "divisa");
   const bancosListos = bancos.filter((c) => archivo("estado_cuenta", c.id) && archivo("libro_sistema", c.id));
@@ -206,6 +207,19 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
               </span>
             </form>
           </div>
+
+          {ultimaLista && (
+            <div className="tarjeta flex flex-wrap items-center justify-between gap-3 p-4">
+              <div className="text-sm">
+                <p className="font-medium">Revisión de la corrida {ultimaLista.numero}</p>
+                <p className="text-tenue">
+                  {ultimaLista.ok_general ? "OK general: no quedan partidas abiertas."
+                    : `${ultimaLista.resumen?.abiertas ?? 0} partidas abiertas. Decide cada una en línea (o con el Excel).`}
+                </p>
+              </div>
+              <Link href={`/clientes/${id}/periodos/${periodoId}/revision`} className="boton">Revisar en línea</Link>
+            </div>
+          )}
 
           <h2 className="subtitulo pt-2">Corridas</h2>
           {corridas.length === 0 ? (

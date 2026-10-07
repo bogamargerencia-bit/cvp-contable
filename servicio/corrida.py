@@ -39,6 +39,7 @@ class Entrada:
     cierre_caja: Optional[Path] = None
     kardex: Optional[Path] = None
     revision: Optional[Path] = None
+    revision_meta: Optional[dict] = None          # subido_en / subido_por del Excel de revisión
     archivos_usados: list[str] = field(default_factory=list)
     avisos: list[str] = field(default_factory=list)
 
@@ -116,15 +117,22 @@ def armar_entrada(cliente: dict, periodo: dict, archivos: list[dict], descargar,
         e.kardex = local(a)
     if a := por_clave.get(("revision", None)):
         e.revision = local(a)
+        e.revision_meta = {"subido_en": a.get("subido_en"), "subido_por": a.get("subido_por")}
     if e.kardex and not e.divisas:
         e.avisos.append("Se subió un Kardex pero ningún libro de cuentas en divisas: el Kardex no se usó.")
     return e
 
 
-def ejecutar(e: Entrada, salida: Path, paso=None, numero: Optional[int] = None) -> tuple[ReporteCliente, ResultadoRevision]:
-    """numero: número de corrida de la app; el Excel lo muestra para que coincida con la pantalla."""
+_SIN_ANTERIOR = object()
+
+
+def ejecutar(e: Entrada, salida: Path, paso=None, numero: Optional[int] = None,
+             anterior=_SIN_ANTERIOR) -> tuple[ReporteCliente, ResultadoRevision]:
+    """numero: número de corrida de la app; el Excel lo muestra para que coincida con la pantalla.
+    anterior: decisiones previas (decisiones.cargar); si no se pasa, se leen solo del Excel de revisión."""
     paso = paso or (lambda etapa, avance: None)
-    anterior = leer_revision(e.revision) if e.revision else None
+    if anterior is _SIN_ANTERIOR:
+        anterior = leer_revision(e.revision) if e.revision else None
     paso(f"Leyendo, cuadrando y conciliando {len(e.bancos)} banco(s)"
          + (", caja" if e.cierre_caja else "") + (" y divisas" if e.divisas else ""), 45)
     rep = procesar_cliente(e.cliente, e.periodo, e.bancos, cierre_caja=e.cierre_caja,
@@ -136,6 +144,11 @@ def ejecutar(e: Entrada, salida: Path, paso=None, numero: Optional[int] = None) 
     paso("Generando el Excel de revisión", 80)
     excel_conciliacion(rep, salida, rv)
     return rep, rv
+
+
+def historial_json(historial: list[list]) -> list[list]:
+    """Historial de decisiones apto para JSON (fechas en ISO); se guarda en el resumen de la corrida."""
+    return [[x.isoformat() if isinstance(x, (dt.datetime, dt.date)) else x for x in fila] for fila in historial]
 
 
 def _txt(v: Optional[Decimal]) -> Optional[str]:
@@ -166,6 +179,7 @@ def resumen(rep: ReporteCliente, rv: ResultadoRevision, e: Entrada) -> dict[str,
         "resueltas": len(rv.resueltas),
         "alertas": rep.alertas + rep.cruces_divisas_bancos,
         "advertencias": rv.advertencias + e.avisos,
+        "historial": historial_json(rv.historial),
         "divisas": [{"cuenta": r.cuenta.nombre, "ventas_ok": r.ventas_ok, "nota": r.ventas_nota}
                     for r in rep.divisas],
         "uso": {"bancos": [b for b, _, _ in e.bancos], "divisas": list(e.divisas),
@@ -206,6 +220,7 @@ def nombre_excel(e: Entrada, numero: int) -> str:
 def procesar_corrida(sb, corrida_id: str) -> bool:
     """Ejecuta la corrida y deja el resultado (o el error) en la tabla corridas.
     Devuelve False si la corrida no estaba pendiente (no existe o ya la tomó otro proceso)."""
+    from . import decisiones                       # importación diferida: decisiones usa Entrada
     filtro = {"id": f"eq.{corrida_id}"}
     if not sb.reclamar("corridas", {"id": f"eq.{corrida_id}", "estado": "eq.pendiente"}, {"estado": "procesando"}):
         return False                              # no existe o ya la tomó otro proceso
@@ -231,14 +246,20 @@ def procesar_corrida(sb, corrida_id: str) -> bool:
             e = armar_entrada(cliente, periodo, archivos, sb.descargar, carpeta,
                               avisar=lambda i, n, nom: paso(f"Descargando archivos ({i} de {n}): {nom}", 5 + 35 * i // n))
             salida = carpeta / nombre_excel(e, corrida["numero"])
+            paso("Leyendo las decisiones de la revisión", 42)
             try:
-                rep, rv = ejecutar(e, salida, paso, corrida["numero"])
+                previo = decisiones.cargar(sb, periodo, corrida, e)
+            except ValueError as ex:                  # Excel de revisión ilegible
+                raise ErrorCorrida(str(ex)) from ex
+            try:
+                rep, rv = ejecutar(e, salida, paso, corrida["numero"], previo.anterior)
             except (ValueError, KeyError) as ex:      # errores de lectura del parser
                 raise ErrorCorrida(f"El parser no pudo leer los archivos: {ex}") from ex
             ruta = f"{cliente['id']}/{periodo['id']}/corridas/{salida.name}"
             paso("Guardando el Excel y los resultados", 90)
             sb.subir(ruta, salida.read_bytes(), XLSX)
         sb.insert("partidas", partidas(corrida_id, rv))
+        decisiones.guardar(sb, periodo, corrida, previo, rep)
         sb.update("corridas", filtro, {
             "estado": "lista", "etapa": "Terminada", "avance": 100, "ok_general": rv.ok_general, "resumen": resumen(rep, rv, e),
             "excel_path": ruta, "archivos": e.archivos_usados, "error": None,

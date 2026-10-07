@@ -79,14 +79,28 @@ export async function procesar(f: FormData) {
   volver(r, "ok", `Corrida ${numero} en proceso`);
 }
 
-/** Cerrar el período (cualquier usuario con acceso) o reabrirlo (solo admin: lo valida el trigger). */
+/**
+ * Cerrar el período o reabrirlo (solo admin: lo valida el trigger).
+ * Un analista solo cierra con OK general en la última corrida; el admin puede cerrar sin él
+ * (p. ej. cuando el propio estado de cuenta del banco no cuadra y está justificado).
+ */
 export async function cambiarEstadoPeriodo(f: FormData) {
-  await perfilActual();
+  const perfil = await perfilActual();
   const clienteId = String(f.get("cliente_id"));
   const periodoId = String(f.get("periodo_id"));
   const estado = f.get("estado") === "cerrado" ? "cerrado" : "abierto";
   const r = ruta(clienteId, periodoId);
   const supabase = await crearClienteServidor();
+  if (estado === "cerrado") {
+    const { data: ultima } = await supabase.from("corridas").select("numero, estado, ok_general")
+      .eq("periodo_id", periodoId).order("numero", { ascending: false }).limit(1);
+    const c = ultima?.[0];
+    if (!c || c.estado !== "lista") volver(r, "error", "Para cerrar, la última corrida debe estar terminada");
+    if (!c.ok_general && perfil.rol !== "admin") {
+      volver(r, "error", `La corrida ${c.numero} no tiene OK general: decide las partidas abiertas y vuelve a procesar. `
+        + "Si hay que cerrar igual, debe hacerlo un administrador.");
+    }
+  }
   const { error } = await supabase.from("periodos").update({ estado }).eq("id", periodoId);
   if (error) volver(r, "error", estado === "abierto" ? "Solo un administrador puede reabrir el período" : "No se pudo cerrar");
   revalidatePath(r);
