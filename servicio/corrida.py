@@ -121,7 +121,8 @@ def armar_entrada(cliente: dict, periodo: dict, archivos: list[dict], descargar,
     return e
 
 
-def ejecutar(e: Entrada, salida: Path, paso=None) -> tuple[ReporteCliente, ResultadoRevision]:
+def ejecutar(e: Entrada, salida: Path, paso=None, numero: Optional[int] = None) -> tuple[ReporteCliente, ResultadoRevision]:
+    """numero: número de corrida de la app; el Excel lo muestra para que coincida con la pantalla."""
     paso = paso or (lambda etapa, avance: None)
     anterior = leer_revision(e.revision) if e.revision else None
     paso(f"Leyendo, cuadrando y conciliando {len(e.bancos)} banco(s)"
@@ -130,6 +131,8 @@ def ejecutar(e: Entrada, salida: Path, paso=None) -> tuple[ReporteCliente, Resul
                            correcciones_caja=correcciones_caja(anterior) if anterior else None,
                            libros_divisas=e.divisas or None, kardex=e.kardex if e.divisas else None)
     rv = aplicar(rep, anterior)
+    if numero is not None:
+        rv.corrida = numero
     paso("Generando el Excel de revisión", 80)
     excel_conciliacion(rep, salida, rv)
     return rep, rv
@@ -227,7 +230,7 @@ def procesar_corrida(sb, corrida_id: str) -> bool:
                               avisar=lambda i, n, nom: paso(f"Descargando archivos ({i} de {n}): {nom}", 5 + 35 * i // n))
             salida = carpeta / nombre_excel(e, corrida["numero"])
             try:
-                rep, rv = ejecutar(e, salida, paso)
+                rep, rv = ejecutar(e, salida, paso, corrida["numero"])
             except (ValueError, KeyError) as ex:      # errores de lectura del parser
                 raise ErrorCorrida(f"El parser no pudo leer los archivos: {ex}") from ex
             ruta = f"{cliente['id']}/{periodo['id']}/corridas/{salida.name}"
