@@ -54,3 +54,15 @@ def test_referencia_como_texto_con_coma():
     m = leer_libro(FIX / "mayor_banplus.xls")
     (a,) = [a for a in m.asientos if a.fila == 22]
     assert a.monto_bs == D("152637.69")
+
+
+def test_banplus_sept_archivo_sin_dos_movimientos():
+    """El export de Banplus de sept. no cuadra por sí mismo: faltan 2 movimientos del 30/09 (neto −2.557,25).
+    No se ajusta: queda como «no cuadra». El período es septiembre aunque traiga 2 movimientos del 01/10."""
+    e = LECTORES["BANPLUS"].leer([FIX / "edo_banplus.xlsx"]).extractos[0]
+    assert (str(e.desde), str(e.hasta), len(e.movimientos)) == ("2026-09-01", "2026-09-30", 1034)
+    assert not e.errores_lectura and "01/10/2026" in e.avisos_lectura[0]
+    (r,) = cuadrar([e])
+    assert r.estado.value == "no_cuadra"
+    assert [d.tipo.value for d in r.diferencias] == ["saldo_linea", "saldo_linea", "nuevo_saldo"]
+    assert "diferencia 2.557,25" in r.diferencias[-1].mensaje

@@ -97,6 +97,7 @@ class Extracto:
     # Líneas que parecían movimientos pero el lector no pudo interpretar.
     # Cualquier error de lectura impide que el extracto se dé por cuadrado.
     errores_lectura: list[str] = field(default_factory=list)
+    avisos_lectura: list[str] = field(default_factory=list)   # observaciones que no impiden cuadrar
 
     def __post_init__(self) -> None:
         self.saldo_anterior = a_monto(self.saldo_anterior)

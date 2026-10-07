@@ -87,19 +87,32 @@ class LectorBanplus:
         if saldo_fin is None:
             errores.append("No se encontró la fila 'Saldo Total'")
         fechas = [m.fecha_contable for m in movs]
+        avisos: list[str] = []
         desde = min(fechas) if fechas else None
         hasta = max(fechas) if fechas else dt.date.today()
-        # El export no dice el período; si es un mes calendario, se toma el mes completo.
+        # El export no dice el período; si es un mes calendario, se toma el mes completo. Si trae unos
+        # pocos movimientos de los primeros días del mes siguiente (p. ej. intereses del 01/10), el período
+        # es el mes con más movimientos y se avisa; esos movimientos se mantienen (forman parte del saldo).
         if fechas and desde.day <= 3:
             desde = desde.replace(day=1)
-            sig = (hasta.replace(day=28) + dt.timedelta(days=4))
-            hasta = sig - dt.timedelta(days=sig.day)
+            from collections import Counter
+            (anio, mes), _ = Counter((f.year, f.month) for f in fechas).most_common(1)[0]
+            fin_mes = (dt.date(anio, mes, 28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1)
+            fuera = [f for f in fechas if f > fin_mes]
+            if fuera and (anio, mes) == (desde.year, desde.month):
+                avisos.append(f"El archivo incluye {len(fuera)} movimiento(s) posteriores al período "
+                               f"({', '.join(sorted({f'{f:%d/%m/%Y}' for f in fuera}))}); se incluyen porque "
+                               "forman parte del saldo final del archivo.")
+                hasta = fin_mes
+            else:
+                sig = (hasta.replace(day=28) + dt.timedelta(days=4))
+                hasta = sig - dt.timedelta(days=sig.day)
         return Extracto(
             banco=BANCO, cuenta=cuenta, desde=desde, hasta=hasta,
             saldo_anterior=saldo_ini if saldo_ini is not None else CERO,
             movimientos=movs,
             totales_banco=TotalesBanco(saldo_anterior=saldo_ini, nuevo_saldo=saldo_fin),
-            archivo=ruta.name, errores_lectura=errores,
+            archivo=ruta.name, errores_lectura=errores, avisos_lectura=avisos,
         )
 
     def _leer_xls(self, ruta: Path) -> Extracto:

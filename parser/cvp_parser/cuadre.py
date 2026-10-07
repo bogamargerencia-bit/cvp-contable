@@ -50,6 +50,7 @@ class TipoAviso(str, Enum):
     MONTO_DEDUCIDO = "monto_deducido"
     NO_VERIFICABLE = "no_verificable"
     SIN_SALDOS_LINEA = "sin_saldos_linea"
+    OBSERVACION = "observacion"
 
 
 @dataclass
@@ -107,6 +108,8 @@ def cuadrar_extracto(e: Extracto) -> ResultadoCuadre:
     # 1. Errores de lectura
     for err in e.errores_lectura:
         r.diferencias.append(Diferencia(TipoDiferencia.ERROR_LECTURA, f"Línea no leída: {err}"))
+    for obs in e.avisos_lectura:
+        r.avisos.append(Aviso(TipoAviso.OBSERVACION, obs))
 
     # 2. Saldo línea por línea
     saldo = e.saldo_anterior
