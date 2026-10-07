@@ -33,6 +33,9 @@ from .montos import CERO, monto_excel
 from .sistema import AsientoLibro, LibroBanco
 
 
+VENTA_APARTE = "Venta del día anotada aparte en el Kardex"
+
+
 @dataclass
 class CuentaDivisa:
     nombre: str                         # «Efectivo $», «Zelle», «USDT», «Fondo de efectivo»
@@ -186,6 +189,15 @@ def conciliar_cuenta(cta: CuentaDivisa, libro: LibroBanco, ventas: Optional[dict
             partidas.append(PartidaDivisa("Incluido en el día del Kardex", [j], [],
                                           f"El Kardex suma {_signo(a)} en las ventas del {a.fecha:%d/%m}; "
                                           "no es una venta."))
+    for k in list(libres_k):                                                # venta del día anotada aparte
+        d = por_dia.get(k.fecha)
+        if d and k.monto > 0 and d.diferencia == -k.monto and "explicada" not in d.nota:
+            d.nota = (f"Diferencia explicada: el Kardex anotó {k.monto} de ventas del día aparte, en la fila {k.fila} "
+                      f"(«{k.descripcion}»).")
+            libres_k.remove(k)
+            partidas.append(PartidaDivisa(VENTA_APARTE, [], [k],
+                                          f"Kardex fila {k.fila} «{k.descripcion}» {k.monto} = lo que le falta a la fila "
+                                          f"de ventas del {k.fecha:%d/%m} (ventas {d.ventas} · Kardex {d.kardex})."))
     for j in libres_a:
         a = asientos[j]
         pista = next((k for k in libres_k if k.monto == _signo(a)), None)

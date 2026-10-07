@@ -480,3 +480,14 @@ def explicar_divisa_fecha(cuenta: str, a, k, lado: str) -> Explicacion:
              "fechas son correctas, «Justificado» indicando la diferencia. Decide igual esta partida y la del "
              + ("Kardex" if lado == "libro" else "libro") + ".")
     return Explicacion(texto, hacer, "Justificado")
+
+
+def explicar_venta_aparte(cuenta: str, k, ventas: Decimal, kardex_dia: Decimal) -> Explicacion:
+    """Parte de las ventas del día que el Kardex anotó en una fila aparte (no en la fila de ventas)."""
+    return Explicacion(
+        f"Es venta del día, anotada en otra fila del Kardex. El cierre de caja tiene US$ {bs(ventas)} de ventas en "
+        f"{cuenta} el {k.fecha:%d/%m}; la fila de ventas del Kardex tiene US$ {bs(kardex_dia)} (faltan "
+        f"US$ {bs(ventas - kardex_dia)}), y el Kardex anotó esos US$ {bs(k.monto)} aparte, en la fila {k.fila} "
+        f"(«{k.descripcion}»). Las dos diferencias se compensan exactamente.",
+        "Nada que corregir en el libro. Si se quiere el Kardex ordenado, sumar esa fila a la de ventas del día.",
+        "Aceptar")

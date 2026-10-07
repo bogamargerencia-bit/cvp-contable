@@ -21,3 +21,19 @@ def test_misma_compra_fuera_de_tres_dias():
     e = explicar_divisa_fecha("Efectivo $", a, k, "libro")
     assert "misma operación" in e.texto and "25/09" in e.texto and "29/09" in e.texto
     assert "4 días" in e.texto and "1.000,00" in e.texto and e.decision == "Justificado"
+
+
+def test_venta_del_dia_anotada_aparte():
+    """WEI 04/09: ventas de efectivo $ completas en la caja; el Kardex pone 546 en una fila aparte («Vierenes»)."""
+    from cvp_parser.diagnostico import explicar_venta_aparte
+    from cvp_parser.divisas import VENTA_APARTE
+    libro = LibroBanco("efectivo.xls", [], D("0"), D("0"))
+    dia = dt.date(2026, 9, 4)
+    kx = Kardex("kardex.xlsx", "SEP", [MovKardex(20, dia, "DIVISAS", D("1000.00"), "Ventas", "venta_dia"),
+                                       MovKardex(21, dia, "DIVISAS", D("546.00"), "Vierenes", "evento")], {}, {})
+    r = conciliar_cuenta(CuentaDivisa("Efectivo $", None, "DIVISAS"), libro, {dia: D("1546.00")}, kx)
+    [p] = r.partidas
+    assert p.estado == VENTA_APARTE and p.kardex[0].fila == 21
+    assert r.dias_con_diferencia == []                      # la diferencia del día queda explicada
+    e = explicar_venta_aparte("Efectivo $", p.kardex[0], D("1546.00"), D("1000.00"))
+    assert "546,00" in e.texto and "fila 21" in e.texto and e.decision == "Aceptar"

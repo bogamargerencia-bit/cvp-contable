@@ -31,9 +31,10 @@ import openpyxl
 from .conciliacion import EstadoPartida as EP
 from .conciliacion_caja import EstadoCaja
 from .cuadre import Estado
-from .diagnostico import (Explicacion, diagnosticar, explicar_caja_dia, explicar_diferencia_monto, explicar_divisa_fecha, explicar_grupo,
+from .diagnostico import (Explicacion, diagnosticar, explicar_caja_dia, explicar_diferencia_monto, explicar_divisa_fecha, explicar_venta_aparte, explicar_grupo,
                           explicar_libro_sin_entradas, explicar_mov_suelto, explicar_otro_banco, explicar_pareja,
                           explicar_solo_libro, generico)
+from .divisas import VENTA_APARTE
 from .naturaleza import E_TRANSF, E_TRASLADO, OTROS, S_IMPUESTOS, S_PAGO_MOVIL, S_TRANSF, S_TRASLADO
 from .proceso import ReporteCliente
 
@@ -265,6 +266,12 @@ def pendientes(rep: ReporteCliente) -> list[Pendiente]:
                         a.debito_usd - a.credito_usd, p.nota,
                         "Aceptar" if p.estado.startswith("Incluido") else "Corregido / Justificado",
                         exp=explicar_divisa_fecha(n, a, p.pista, "libro") if p.pista else None)
+            if p.estado == VENTA_APARTE:
+                k = p.kardex[0]
+                d = next(x for x in r.dias if x.fecha == k.fecha)
+                agregar(n, "Caja", f"Divisas: {VENTA_APARTE.lower()}", k.fecha, k.descripcion, None, k.monto,
+                        p.nota, "Aceptar", exp=explicar_venta_aparte(n, k, d.ventas, d.kardex))
+                continue
             for k in p.kardex:
                 a = pares.get(k.fila)
                 agregar(n, "Caja", "Divisas: solo en Kardex", k.fecha, k.descripcion, None, k.monto,
