@@ -3,15 +3,15 @@ import { notFound } from "next/navigation";
 import { Mensajes } from "@/components/mensajes";
 import { perfilActual } from "@/lib/sesion";
 import { crearClienteServidor } from "@/lib/supabase/server";
-import { BANCOS, MESES, nombreBanco, type Cliente, type Cuenta, type Periodo } from "@/lib/tipos";
-import { cambiarEstadoCliente, crearCuenta, crearPeriodo } from "../actions";
+import { BANCOS, CONFIGS_PARSER, DIVISAS_PARSER, MESES, nombreBanco, type Cliente, type Cuenta, type Periodo } from "@/lib/tipos";
+import { cambiarEstadoCliente, crearCuenta, crearPeriodo, editarCliente, editarCuenta, eliminarCuenta } from "../actions";
 
 /** Muestra solo los últimos 4 dígitos: son datos bancarios de terceros. */
 const enmascarar = (n: string | null) => (n ? `•••• ${n.slice(-4)}` : "—");
 
 export default async function DetalleCliente({ params, searchParams }: PageProps<"/clientes/[id]">) {
   const { id } = await params;
-  const { error, ok } = await searchParams;
+  const { error, ok, editar } = await searchParams;
   const perfil = await perfilActual();
   const esAdmin = perfil.rol === "admin";
   const supabase = await crearClienteServidor();
@@ -25,6 +25,8 @@ export default async function DetalleCliente({ params, searchParams }: PageProps
   const c = cliente as Cliente;
   const ctas = (cuentas ?? []) as Cuenta[];
   const pers = (periodos ?? []) as Periodo[];
+  const editando = esAdmin ? ctas.find((k) => k.id === editar) : undefined;
+  const divisasParser = c.clave_config ? DIVISAS_PARSER[c.clave_config] ?? [] : [];
 
   const hoy = new Date();
   const mesAnterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
@@ -50,6 +52,37 @@ export default async function DetalleCliente({ params, searchParams }: PageProps
         )}
       </div>
       <Mensajes error={error} ok={ok} />
+
+      {esAdmin && (
+        <details className="tarjeta mb-6">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Editar datos del cliente</summary>
+          <form action={editarCliente} className="grid gap-4 border-t border-linea p-4 sm:grid-cols-2">
+            <input type="hidden" name="id" value={c.id} />
+            <div>
+              <label htmlFor="c_nombre" className="etiqueta">Razón social *</label>
+              <input id="c_nombre" name="nombre" required defaultValue={c.nombre} className="campo" />
+            </div>
+            <div>
+              <label htmlFor="c_comercial" className="etiqueta">Nombre comercial</label>
+              <input id="c_comercial" name="nombre_comercial" defaultValue={c.nombre_comercial ?? ""} className="campo" />
+            </div>
+            <div>
+              <label htmlFor="c_rif" className="etiqueta">RIF</label>
+              <input id="c_rif" name="rif" defaultValue={c.rif ?? ""} className="campo" placeholder="J-12345678-9" />
+            </div>
+            <div>
+              <label htmlFor="c_clave" className="etiqueta">Reglas del parser</label>
+              <select id="c_clave" name="clave_config" className="campo" defaultValue={c.clave_config ?? ""}>
+                <option value="">Detección automática</option>
+                {CONFIGS_PARSER.map((k) => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <button className="boton">Guardar cliente</button>
+            </div>
+          </form>
+        </details>
+      )}
 
       <div className="grid gap-8 lg:grid-cols-5">
         {/* ------------------------------------------------ períodos */}
@@ -94,13 +127,14 @@ export default async function DetalleCliente({ params, searchParams }: PageProps
             ) : (
               <table className="tabla">
                 <thead>
-                  <tr><th>Cuenta</th><th>Banco / medio</th><th>Número</th><th>Moneda</th></tr>
+                  <tr><th>Cuenta</th><th>Banco / medio</th><th>Número</th><th>Moneda</th>{esAdmin && <th />}</tr>
                 </thead>
                 <tbody>
                   {ctas.map((k) => (
-                    <tr key={k.id}>
+                    <tr key={k.id} className={k.activo ? "" : "text-tenue"}>
                       <td>
                         {k.nombre}
+                        {!k.activo && <span className="insignia ml-2 bg-linea text-tenue">inactiva</span>}
                         {k.es_personal && (
                           <span className="insignia ml-2 bg-aviso-suave text-aviso" title={k.titular ?? undefined}>personal</span>
                         )}
@@ -109,6 +143,11 @@ export default async function DetalleCliente({ params, searchParams }: PageProps
                       <td>{k.tipo === "divisa" ? "Divisas" : nombreBanco(k.banco)}</td>
                       <td className="whitespace-nowrap font-mono text-xs">{enmascarar(k.numero)}</td>
                       <td>{k.moneda === "USD" ? "US$" : "Bs."}</td>
+                      {esAdmin && (
+                        <td className="text-right">
+                          <Link href={`/clientes/${c.id}?editar=${k.id}#editar`} className="text-sm text-acento hover:underline">Editar</Link>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -116,51 +155,100 @@ export default async function DetalleCliente({ params, searchParams }: PageProps
             )}
           </div>
 
-          {esAdmin && (
+          {editando && (
+            <div id="editar" className="tarjeta mt-4 border-acento">
+              <div className="flex items-center justify-between px-4 py-3">
+                <p className="text-sm font-medium">Editar cuenta «{editando.nombre}»</p>
+                <Link href={`/clientes/${c.id}`} className="text-sm text-tenue hover:text-acento">Cancelar</Link>
+              </div>
+              <FormCuenta clienteId={c.id} cuenta={editando} divisas={divisasParser} />
+              <form action={eliminarCuenta} className="border-t border-linea px-4 py-3">
+                <input type="hidden" name="cliente_id" value={c.id} />
+                <input type="hidden" name="id" value={editando.id} />
+                <button className="text-sm text-alerta hover:underline">Eliminar esta cuenta</button>
+                <span className="ml-2 text-xs text-tenue">Solo si nunca se le subió un archivo; si no, desmárcala como activa.</span>
+              </form>
+            </div>
+          )}
+
+          {esAdmin && !editando && (
             <details className="tarjeta mt-4">
               <summary className="cursor-pointer px-4 py-3 text-sm font-medium">Agregar cuenta</summary>
-              <form action={crearCuenta} className="grid gap-4 border-t border-linea p-4 sm:grid-cols-2">
-                <input type="hidden" name="cliente_id" value={c.id} />
-                <div>
-                  <label htmlFor="tipo" className="etiqueta">Tipo</label>
-                  <select id="tipo" name="tipo" className="campo" defaultValue="banco">
-                    <option value="banco">Cuenta bancaria (Bs.)</option>
-                    <option value="divisa">Divisas (US$: efectivo, Zelle, USDT, fondo)</option>
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="banco" className="etiqueta">Banco (si es bancaria)</label>
-                  <select id="banco" name="banco" className="campo" defaultValue="">
-                    <option value="">—</option>
-                    {BANCOS.map((b) => (
-                      <option key={b.codigo} value={b.codigo}>{b.nombre}{b.pendiente ? " (lector pendiente)" : ""}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="nombre" className="etiqueta">Nombre *</label>
-                  <input id="nombre" name="nombre" required className="campo" placeholder="BNC ***1800 · Zelle" />
-                </div>
-                <div>
-                  <label htmlFor="numero" className="etiqueta">Número (20 dígitos)</label>
-                  <input id="numero" name="numero" inputMode="numeric" className="campo font-mono" />
-                </div>
-                <div>
-                  <label htmlFor="titular" className="etiqueta">Titular</label>
-                  <input id="titular" name="titular" className="campo" />
-                </div>
-                <label className="flex items-center gap-2 self-end pb-2 text-sm">
-                  <input type="checkbox" name="es_personal" className="accent-acento" />
-                  Cuenta personal de un socio usada por la empresa
-                </label>
-                <div className="sm:col-span-2">
-                  <button className="boton">Agregar cuenta</button>
-                </div>
-              </form>
+              <FormCuenta clienteId={c.id} divisas={divisasParser} />
             </details>
           )}
         </section>
       </div>
     </>
+  );
+}
+
+/** Formulario de cuenta: sin `cuenta` crea una nueva; con `cuenta` la edita. */
+function FormCuenta({ clienteId, cuenta, divisas }: { clienteId: string; cuenta?: Cuenta; divisas: string[] }) {
+  const k = cuenta;
+  const p = k ? `e_` : "n_";
+  return (
+    <form action={k ? editarCuenta : crearCuenta} className="grid gap-4 border-t border-linea p-4 sm:grid-cols-2">
+      <input type="hidden" name="cliente_id" value={clienteId} />
+      {k && <input type="hidden" name="id" value={k.id} />}
+      <div>
+        <label htmlFor={`${p}tipo`} className="etiqueta">Tipo</label>
+        <select id={`${p}tipo`} name="tipo" className="campo" defaultValue={k?.tipo ?? "banco"}>
+          <option value="banco">Cuenta bancaria (Bs.)</option>
+          <option value="divisa">Divisas (US$: efectivo, Zelle, USDT, fondo)</option>
+        </select>
+      </div>
+      <div>
+        <label htmlFor={`${p}banco`} className="etiqueta">Banco (si es bancaria)</label>
+        <select id={`${p}banco`} name="banco" className="campo" defaultValue={k?.banco ?? ""}>
+          <option value="">—</option>
+          {BANCOS.map((b) => (
+            <option key={b.codigo} value={b.codigo}>{b.nombre}{b.pendiente ? " (lector pendiente)" : ""}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label htmlFor={`${p}nombre`} className="etiqueta">Nombre *</label>
+        <input id={`${p}nombre`} name="nombre" required className="campo" defaultValue={k?.nombre ?? ""}
+          placeholder="BNC ***1800 · Zelle" list={divisas.length ? `${p}divisas` : undefined} />
+        {divisas.length > 0 && (
+          <>
+            <datalist id={`${p}divisas`}>{divisas.map((d) => <option key={d} value={d} />)}</datalist>
+            <span className="mt-1 block text-xs text-tenue">
+              Cuentas en divisas: el nombre debe ser uno de estos: {divisas.join(" · ")}
+            </span>
+          </>
+        )}
+      </div>
+      <div>
+        <label htmlFor={`${p}numero`} className="etiqueta">Número (20 dígitos)</label>
+        <input id={`${p}numero`} name="numero" inputMode="numeric" className="campo font-mono"
+          placeholder={k?.numero ? `${enmascarar(k.numero)} · vacío = no cambiar` : ""} />
+        {k?.numero && (
+          <label className="mt-1 flex items-center gap-2 text-xs text-tenue">
+            <input type="checkbox" name="borrar_numero" className="accent-acento" /> Quitar el número guardado
+          </label>
+        )}
+      </div>
+      <div>
+        <label htmlFor={`${p}titular`} className="etiqueta">Titular</label>
+        <input id={`${p}titular`} name="titular" className="campo" defaultValue={k?.titular ?? ""} />
+      </div>
+      <div className="space-y-2 self-end pb-2 text-sm">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" name="es_personal" defaultChecked={k?.es_personal ?? false} className="accent-acento" />
+          Cuenta personal de un socio usada por la empresa
+        </label>
+        {k && (
+          <label className="flex items-center gap-2">
+            <input type="checkbox" name="activo" defaultChecked={k.activo} className="accent-acento" />
+            Activa (aparece en los períodos)
+          </label>
+        )}
+      </div>
+      <div className="sm:col-span-2">
+        <button className="boton">{k ? "Guardar cambios" : "Agregar cuenta"}</button>
+      </div>
+    </form>
   );
 }

@@ -304,3 +304,14 @@ def test_excel_y_web_gana_lo_mas_reciente(tmp_path):
     assert vig[a]["comentario"] == "excel"            # el Excel es más reciente que la decisión en la web
     assert vig[b]["comentario"] == "web después"      # la web es más reciente que el Excel
     assert len([d for d in sb.t["decisiones"] if d["codigo"] == a]) == 2
+
+
+def test_cuenta_inactiva_se_ignora(tmp_path):
+    sb = FakeSB()
+    c, p = sb.cliente("X", None)
+    k = sb.cuenta(c, "BNC equivocada", banco="BNC")
+    k["activo"] = False
+    sb.archivo(p, Path(__file__), "estado_cuenta", k)
+    archivos = sb.select("archivos", periodo_id=f"eq.{p['id']}")
+    with pytest.raises(ErrorCorrida, match="No hay ninguna cuenta bancaria"):
+        armar_entrada(c, p, archivos, sb.descargar, tmp_path)

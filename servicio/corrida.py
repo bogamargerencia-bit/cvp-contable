@@ -59,6 +59,10 @@ def armar_entrada(cliente: dict, periodo: dict, archivos: list[dict], descargar,
 
     # Si hay dos vigentes del mismo tipo y cuenta, se usa el más reciente y se avisa.
     por_clave: dict[tuple, dict] = {}
+    inactivas = sorted({a["cuenta"]["nombre"] for a in archivos if a.get("cuenta") and a["cuenta"].get("activo") is False})
+    if inactivas:
+        e.avisos.append("Se ignoraron los archivos de cuentas inactivas: " + ", ".join(inactivas) + ".")
+    archivos = [a for a in archivos if not (a.get("cuenta") and a["cuenta"].get("activo") is False)]
     for a in sorted(archivos, key=lambda a: a["subido_en"]):
         k = (a["tipo"], a.get("cuenta_id"))
         if k in por_clave:

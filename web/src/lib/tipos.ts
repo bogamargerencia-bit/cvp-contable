@@ -58,6 +58,11 @@ export const BANCOS: { codigo: string; nombre: string; pendiente?: boolean }[] =
 /** Claves de configuración que existen en parser/cvp_parser/clientes.py. */
 export const CONFIGS_PARSER = ["WEI REST", "CACAO"];
 
+/** Nombres de las cuentas en divisas que reconoce el parser para cada configuración (clientes.py). */
+export const DIVISAS_PARSER: Record<string, string[]> = {
+  "WEI REST": ["Efectivo $", "Zelle", "USDT", "Fondo de efectivo"],
+};
+
 export const MESES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
   "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
