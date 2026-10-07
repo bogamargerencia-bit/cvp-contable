@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Mensajes } from "@/components/mensajes";
 import { iniciarSesion } from "./actions";
 
@@ -21,6 +22,9 @@ export default async function Login({ searchParams }: PageProps<"/login">) {
             <input id="password" name="password" type="password" autoComplete="current-password" required className="campo" />
           </div>
           <button className="boton w-full">Entrar</button>
+          <p className="text-center text-sm">
+            <Link href="/recuperar" className="text-acento hover:underline">¿Olvidaste tu contraseña?</Link>
+          </p>
         </form>
         <p className="mt-6 text-center text-xs text-tenue">
           Las cuentas las crea el administrador. Si no tienes acceso, pídeselo.

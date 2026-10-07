@@ -54,3 +54,19 @@ export async function actualizarUsuario(f: FormData) {
   if (error) err("No se pudo actualizar el usuario");
   revalidatePath(RUTA);
 }
+
+/**
+ * El admin le pone una contraseña temporal a otro usuario (cuando no le llega el correo de recuperación).
+ * Usa la clave de servicio solo en el servidor; el usuario la cambia luego en «Mi cuenta».
+ */
+export async function restablecerContrasena(f: FormData) {
+  const yo = await exigirAdmin();
+  const id = String(f.get("id"));
+  const password = String(f.get("password") ?? "");
+  if (id === yo.id) err("Para tu propia contraseña usa «Mi cuenta»");
+  if (password.length < 10) err("La contraseña temporal debe tener al menos 10 caracteres");
+  const { error } = await crearClienteAdmin().auth.admin.updateUserById(id, { password });
+  if (error) err("No se pudo cambiar la contraseña");
+  revalidatePath(RUTA);
+  redirect(`${RUTA}?ok=${encodeURIComponent("Contraseña temporal asignada. Entrégala por un canal seguro y pide que la cambie en «Mi cuenta».")}`);
+}

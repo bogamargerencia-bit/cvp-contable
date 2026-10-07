@@ -23,7 +23,8 @@ export async function proxy(request: NextRequest) {
     },
   );
   const { data } = await supabase.auth.getClaims();
-  const publica = request.nextUrl.pathname.startsWith("/login");
+  const ruta = request.nextUrl.pathname;
+  const publica = ["/login", "/recuperar", "/auth/"].some((p) => ruta.startsWith(p));
   if (!data?.claims && !publica) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";

@@ -2,7 +2,7 @@ import { Mensajes } from "@/components/mensajes";
 import { exigirAdmin } from "@/lib/sesion";
 import { crearClienteServidor } from "@/lib/supabase/server";
 import type { Perfil } from "@/lib/tipos";
-import { actualizarUsuario, crearUsuario } from "./actions";
+import { actualizarUsuario, crearUsuario, restablecerContrasena } from "./actions";
 
 export default async function Usuarios({ searchParams }: PageProps<"/admin/usuarios">) {
   const yo = await exigirAdmin();
@@ -41,6 +41,7 @@ export default async function Usuarios({ searchParams }: PageProps<"/admin/usuar
                       </td>
                       <td>
                         {!soyYo && (
+                          <>
                           <div className="flex justify-end gap-2">
                             <form action={actualizarUsuario}>
                               <input type="hidden" name="id" value={u.id} />
@@ -57,6 +58,17 @@ export default async function Usuarios({ searchParams }: PageProps<"/admin/usuar
                               <button className="boton-sec">{u.activo ? "Desactivar" : "Activar"}</button>
                             </form>
                           </div>
+                            <details className="mt-2 text-right">
+                              <summary className="cursor-pointer text-xs text-acento">Contraseña temporal</summary>
+                              <form action={restablecerContrasena} className="mt-2 flex justify-end gap-2">
+                                <input type="hidden" name="id" value={u.id} />
+                                <input name="password" type="text" minLength={10} required autoComplete="off"
+                                  placeholder="mínimo 10 caracteres" aria-label={`Contraseña temporal para ${u.email}`}
+                                  className="campo max-w-48 py-1.5" />
+                                <button className="boton-sec whitespace-nowrap">Asignar</button>
+                              </form>
+                            </details>
+                          </>
                         )}
                       </td>
                     </tr>
