@@ -189,6 +189,8 @@ def partidas(corrida_id: str, rv: ResultadoRevision) -> list[dict[str, Any]]:
             "monto_usd": _txt(p.monto_usd),
             "detalle": p.detalle or None,
             "sugerencia": p.sugerencia or None,
+            "explicacion": p.explicacion or None,
+            "que_hacer": p.que_hacer or None,
             "situacion": p.situacion.value,
             "aviso": p.aviso or None,
             "propuesta": {"fila": p.propuesta[0], "fecha": p.propuesta[1].isoformat()} if p.propuesta else None,

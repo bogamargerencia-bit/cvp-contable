@@ -625,7 +625,8 @@ def _hoja_revision(ws, rep: ReporteCliente, rv) -> None:
             motivo.append(f"{len(abiertas)} partidas abiertas")
         ws["A3"] = "CON PENDIENTES — " + "; ".join(motivo)
         ws["A3"].font = Font(name="Arial", size=12, bold=True, color="C00000")
-    ws["A4"] = ("Cómo usar: complete solo las columnas en amarillo (Decisión, Comentario, Revisado por) y vuelva a "
+    ws["A4"] = ("Cómo usar: lea «Explicación» y «Qué hacer» de cada partida. Complete solo las columnas en amarillo "
+                "(Decisión, Comentario, Revisado por; «Decisión sugerida» es una guía) y vuelva a "
                 "subir ESTE archivo junto con los exports corregidos del sistema, si los hay. Decisiones: "
                 "«Aceptar» (lo propuesto es correcto), «Justificado» (correcto así; comentario obligatorio), "
                 "«Corregido en el sistema» (se corrigió el asiento; en la próxima corrida debe desaparecer). "
@@ -654,35 +655,40 @@ def _hoja_revision(ws, rep: ReporteCliente, rv) -> None:
 
     r = k + 2
     titulos = ["Código", "Banco", "Origen", "Tipo", "Fecha", "Descripción", "Monto (Bs.)", "Monto (US$)",
-               "Detalle / pareja", "Sugerencia", "Situación", "Decisión", "Comentario", "Revisado por", "Aviso"]
-    _enc(ws, r, titulos, [15, 9, 8, 34, 11, 40, 15, 12, 70, 28, 22, 22, 40, 16, 50])
+               "Explicación", "Qué hacer", "Decisión sugerida", "Situación", "Decisión", "Comentario",
+               "Revisado por", "Aviso", "Detalle técnico"]
+    _enc(ws, r, titulos, [15, 9, 8, 30, 11, 36, 15, 12, 70, 45, 20, 20, 22, 40, 16, 40, 50])
     editable = PatternFill("solid", start_color="FFF2CC")
     fill_sit = {Situacion.CERRADO: PatternFill("solid", start_color="E2EFDA"),
                 Situacion.CORREGIDO_SIGUE: PatternFill("solid", start_color="FFC7CE"),
                 Situacion.INCOMPLETA: PatternFill("solid", start_color="FFEB9C")}
     orden_sit = {Situacion.CORREGIDO_SIGUE: 0, Situacion.INCOMPLETA: 1, Situacion.NUEVO: 2,
                  Situacion.SIN_DECISION: 3, Situacion.CERRADO: 4}
+    ajuste = Alignment(wrap_text=True, vertical="top")
     r0 = r + 1
     for p in sorted(rv.pendientes, key=lambda p: (orden_sit[p.situacion], p.banco, p.tipo, p.fecha or dt.date.min)):
         r += 1
         _fila(ws, r, [p.codigo, NOMBRE.get(p.banco, p.banco), p.origen, p.tipo, p.fecha, p.descripcion,
-                      p.monto_bs, p.monto_usd, (p.detalle or "")[:800] or None, p.sugerencia, p.situacion.value,
-                      p.decision or None, p.comentario or None, p.revisado_por or None, p.aviso or None],
+                      p.monto_bs, p.monto_usd, (p.explicacion or "")[:1500] or None, p.que_hacer or None,
+                      p.sugerencia, p.situacion.value, p.decision or None, p.comentario or None,
+                      p.revisado_por or None, p.aviso or None, (p.detalle or "")[:800] or None],
               {5: FECHA, 7: NUM, 8: NUM})
-        ws.cell(r, 11).fill = fill_sit.get(p.situacion, PatternFill())
-        for c in (12, 13, 14):
+        for c in (9, 10):
+            ws.cell(r, c).alignment = ajuste
+        ws.cell(r, 12).fill = fill_sit.get(p.situacion, PatternFill())
+        for c in (13, 14, 15):
             ws.cell(r, c).fill = editable
             ws.cell(r, c).protection = Protection(locked=False)
         if p.aviso:
-            ws.cell(r, 15).font = ROJA
+            ws.cell(r, 16).font = ROJA
     if r >= r0:
         dv = DataValidation(type="list", formula1='"' + ",".join(DECISIONES) + '"', allow_blank=True,
                             showErrorMessage=True, errorTitle="Decisión no válida",
                             error="Elija Aceptar, Justificado o Corregido en el sistema.")
         ws.add_data_validation(dv)
-        dv.add(f"L{r0}:L{r}")
-        ws.auto_filter.ref = f"A{r0 - 1}:O{r}"
-    ws.cell(r0 - 1, 12).comment = Comment("Elija de la lista. «Justificado» requiere comentario.", "CVP")
+        dv.add(f"M{r0}:M{r}")
+        ws.auto_filter.ref = f"A{r0 - 1}:Q{r}"
+    ws.cell(r0 - 1, 13).comment = Comment("Elija de la lista. «Justificado» requiere comentario.", "CVP")
     ws.freeze_panes = f"B{r0}"
     ws.protection.sheet = True
     ws.protection.autoFilter = False
@@ -693,12 +699,12 @@ def _hoja_revision(ws, rep: ReporteCliente, rv) -> None:
         r += 3
         ws.cell(r, 1, "Resueltas: estaban en la corrida anterior y ya no aparecen").font = SUB
         r += 1
-        _enc(ws, r, ["Código", "", "", "Tipo", "", "Descripción", "", "", "Decisión anterior", "", "",
-                     "", "Comentario", "Revisado por"])
+        _enc(ws, r, ["Código", "", "", "Tipo", "", "Descripción", "", "", "", "", "", "", "Decisión anterior",
+                     "Comentario", "Revisado por"])
         for d in rv.resueltas:
             r += 1
-            _fila(ws, r, [d.codigo, None, None, d.tipo, None, d.descripcion, None, None, d.decision or "—",
-                          None, None, None, d.comentario or None, d.revisado_por or None],
+            _fila(ws, r, [d.codigo, None, None, d.tipo, None, d.descripcion, None, None, None, None, None, None,
+                          d.decision or "—", d.comentario or None, d.revisado_por or None],
                   fill=PatternFill("solid", start_color="E2EFDA"))
 
 

@@ -77,3 +77,71 @@ def test_pago_movil_fin_de_semana_mismo_dia():
     pm = [l for l in rep.caja.lineas if l.items[0].medio == "Pago móvil"]
     assert len(pm) == 30 and sum(l.estado.value == "Conciliado" for l in pm) == 20
     assert not [p for p in aplicar(rep).pendientes if p.tipo == "Cobros sin día de caja"]
+
+
+@pytest.fixture(scope="module")
+def rv_sept():
+    from cvp_parser.proceso import procesar_cliente
+    from cvp_parser.revision import aplicar
+    rep = procesar_cliente("CACAO", "2026-09", [("BANPLUS", FIX / "edo_banplus.xlsx", FIX / "mayor_banplus.xls"),
+                                                 ("PLAZA", FIX / "edo_plaza.pdf", FIX / "mayor_plaza.xls")],
+                           cierre_caja=FIX / "ventas.xlsx")
+    return aplicar(rep)
+
+
+def _buscar(rv, tipo, texto):
+    return [p for p in rv.pendientes if p.tipo.startswith(tipo) and texto in (p.descripcion + p.explicacion)]
+
+
+def test_diagnostico_todas_las_partidas_explicadas(rv_sept):
+    assert all(p.explicacion and p.que_hacer and p.sugerencia for p in rv_sept.pendientes)
+    assert not [p for p in rv_sept.pendientes if p.explicacion.startswith("Partida que la conciliación")]
+
+
+def test_diagnostico_factura_en_la_referencia(rv_sept):
+    """Las 4 facturas con el número de factura en la Referencia se emparejan con su pago en Banplus."""
+    esperado = {"36930": "107.244,80", "37011": "138.615,74", "778": "8.116,92", "38024": "97.113,95"}
+    for fact, monto in esperado.items():
+        [p] = _buscar(rv_sept, "Solo en libro", f"FACT {fact}")
+        assert "número de factura" in p.explicacion and monto in p.que_hacer
+        assert p.sugerencia == "Corregido en el sistema"
+    # Los movimientos emparejados ya no se listan aparte como «solo en banco».
+    assert not [p for p in rv_sept.pendientes if p.tipo.startswith("Solo en banco")
+                and any(r in p.descripcion for r in ("92117469532", "90117480942", "93017541954", "90217901738"))]
+
+
+def test_diagnostico_hueco_banplus_30_09(rv_sept):
+    ps = [p for p in rv_sept.pendientes if p.tipo == "Estado de cuenta no cuadra" and p.banco == "BANPLUS"]
+    assert ps and all("55.257,80" in p.explicacion and "57.815,05" in p.explicacion and "-2.557,25" in p.explicacion
+                      and "le falten movimientos" in p.explicacion for p in ps)
+
+
+def test_diagnostico_traslado_persona_y_sin_beneficiario(rv_sept):
+    [sal] = _buscar(rv_sept, "Solo en banco: Traslados a cuentas propias", "0063444863")
+    [ent] = _buscar(rv_sept, "Solo en banco: Traslados desde cuentas propias", "164063444863")
+    assert "hacia Banplus" in sal.explicacion and "viene de Plaza" in ent.explicacion
+    dominico = _buscar(rv_sept, "Solo en banco: Pagos por transferencia", "DOMINICO")
+    assert len(dominico) == 3 and all("COMPRA DE 1000$" in p.explicacion for p in dominico)
+    [lol] = _buscar(rv_sept, "Solo en banco: Pagos por transferencia", "LOLIMAR")
+    assert "227.000,00" in lol.explicacion
+    [suelto] = _buscar(rv_sept, "Solo en banco: Pagos por transferencia", "90918099412")
+    assert suelto.monto_bs == D("-42783.00") and "no informa a quién" in suelto.explicacion
+
+
+def test_diagnostico_caja_y_libro_sin_entradas(rv_sept):
+    [d30] = [p for p in rv_sept.pendientes if p.tipo == "Caja: Diferencia en el día" and p.fecha.day == 30]
+    assert "2.580,97" in d30.explicacion and "dos veces" in d30.explicacion
+    [d07] = [p for p in rv_sept.pendientes if p.tipo == "Caja: Diferencia en el día" and p.fecha.day == 7]
+    assert d07.sugerencia == "Aceptar"
+    assert {p.banco for p in rv_sept.pendientes if p.tipo == "Libro sin entradas en el mes"} == {"BANPLUS", "PLAZA"}
+
+
+def test_diagnostico_no_empareja_con_comisiones():
+    """WEI REST: un asiento nunca se propone como pareja de una comisión o cargo del banco."""
+    import test_wei_rest as tw
+    from cvp_parser.proceso import procesar_cliente
+    from cvp_parser.revision import aplicar
+    rv = aplicar(procesar_cliente("WEI REST", "2026-08", tw.ARCHIVOS, cierre_caja=tw.VENTAS))
+    assert not [p for p in rv.pendientes if "Comision" in p.explicacion and p.tipo == "Solo en libro"]
+    [k] = [p for p in rv.pendientes if p.descripcion.startswith("KOZMOS")]
+    assert "10.622,93" in k.explicacion and "-200,00" in k.explicacion

@@ -174,6 +174,8 @@ def test_wei_completo():
     for x in sb.t["partidas"]:
         for m in ("monto_bs", "monto_usd"):
             assert x[m] is None or (isinstance(x[m], str) and Decimal(x[m]) == Decimal(x[m]).quantize(Decimal("0.01")))
+    # Cada partida llega con su explicación y qué hacer (diagnóstico automático).
+    assert all(x["explicacion"] and x["que_hacer"] for x in sb.t["partidas"])
 
 
 @pytest.mark.skipif(not (CACAO / "ventas.xlsx").exists(), reason="faltan los archivos reales de CACAO")
