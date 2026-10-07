@@ -19,7 +19,7 @@ from typing import Optional
 
 import xlrd
 
-from .montos import CERO, MontoInvalido, monto_excel
+from .montos import CERO, MontoInvalido, monto_excel, monto_ve
 
 
 @dataclass
@@ -207,6 +207,8 @@ def leer_libro(ruta: Path) -> LibroBanco:
     difs: list[str] = []
     saldo_anterior: Optional[Decimal] = None
     totales: Optional[tuple[Decimal, Decimal]] = None
+    sin_debitos = False                        # Mayor sin columna de débitos (ver más abajo)
+    totales_corridos: Optional[tuple[Decimal, Decimal]] = None
     ultimo_es_asiento = False
     for r in range(f_enc + 1, len(filas)):
         v = filas[r]
@@ -219,10 +221,17 @@ def leer_libro(ruta: Path) -> LibroBanco:
             if textos[0] == "Cuenta:":
                 if textos[6].startswith("Saldo Anterior") and v[7] != "":
                     saldo_anterior = monto_excel(v[7])
+                elif textos[5].startswith("Saldo Anterior") and v[6] != "":
+                    # Mes sin débitos: el sistema omite esa columna y todo queda corrido a la izquierda.
+                    saldo_anterior = monto_excel(v[6])
+                    sin_debitos = True
                 continue
             if textos[3] in ("Sub Total:", "Totales:"):
                 if textos[3] == "Totales:":
-                    totales = (monto_excel(v[4] or 0), monto_excel(v[5] or 0))
+                    if sin_debitos:
+                        totales_corridos = (monto_excel(v[4] or 0), monto_excel(v[6] or 0))
+                    else:
+                        totales = (monto_excel(v[4] or 0), monto_excel(v[5] or 0))
                 continue
             if (asientos and ultimo_es_asiento and textos[3] and not any(textos[i] for i in (0, 1, 2, 4, 5, 6, 7))):
                 asientos[-1].descripcion += " " + textos[3]         # la descripción sigue en esta línea
@@ -243,15 +252,34 @@ def leer_libro(ruta: Path) -> LibroBanco:
         elif isinstance(ref_raw, (int, float)) and not isinstance(ref_raw, bool) and ref_raw != 0:
             monto_bs = monto_excel(ref_raw)
             referencia = f"{monto_bs}"
+        elif isinstance(ref_raw, str) and re.fullmatch(r"\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}", ref_raw.strip()):
+            monto_bs = monto_ve(ref_raw.strip())        # monto escrito como texto: «152637,69»
+            referencia = f"{monto_bs}"
         elif isinstance(ref_raw, (int, float)) and not isinstance(ref_raw, bool):
             referencia = "0"          # Referencia 0: asiento resumen sin monto en Bs. (CACAO)
         else:
             referencia = str(ref_raw).strip()
+        if sin_debitos:
+            # Columnas corridas: [4] = monto, [6] = saldo. El sentido se decide por el saldo corrido.
+            monto = monto_excel(v[4]) if v[4] != "" else CERO
+            saldo_linea = monto_excel(v[6]) if v[6] != "" else None
+            previo = asientos[-1].saldo_usd if asientos else saldo_anterior
+            if previo is not None and saldo_linea == previo + monto:
+                deb, cre = monto, CERO
+            else:
+                deb, cre = CERO, monto
+                if previo is None or saldo_linea != previo - monto:
+                    difs.append(f"fila {r + 1} ({desc}): no se pudo confirmar con el saldo si {monto} es entrada "
+                                "o salida; se tomó como salida")
+        else:
+            deb = monto_excel(v[4]) if v[4] != "" else CERO
+            cre = monto_excel(v[5]) if v[5] != "" else CERO
+            saldo_linea = monto_excel(v[7]) if v[7] != "" else None
         asientos.append(AsientoLibro(
             fila=r + 1, fecha=fecha, comprobante=comp, referencia=referencia, descripcion=desc,
-            debito_usd=monto_excel(v[4]) if v[4] != "" else CERO,
-            credito_usd=monto_excel(v[5]) if v[5] != "" else CERO,
-            saldo_usd=monto_excel(v[7]) if v[7] != "" else None,
+            debito_usd=deb,
+            credito_usd=cre,
+            saldo_usd=saldo_linea,
             monto_bs=monto_bs, referencia_banco=ref_banco,
             componentes_bs=_componentes(desc) if monto_bs is None and not ref_banco else [],
         ))
@@ -269,6 +297,15 @@ def leer_libro(ruta: Path) -> LibroBanco:
         if a.saldo_usd is not None and a.saldo_usd != saldo:
             difs.append(f"fila {a.fila} ({a.descripcion}): saldo calculado {saldo} vs. libro {a.saldo_usd}")
             saldo = a.saldo_usd
+    if totales_corridos is not None:
+        movido = sum((a.debito_usd + a.credito_usd for a in asientos), CERO)
+        if (movido, saldo) != totales_corridos:
+            difs.append(f"Totales del Mayor (sin columna de débitos): monto {totales_corridos[0]} / saldo "
+                        f"{totales_corridos[1]} vs. suma de las líneas {movido} / saldo calculado {saldo}")
+    avisos = []
+    if sin_debitos:
+        avisos.append("El Mayor no trae columna de débitos (el sistema la omite cuando el mes no tiene entradas): "
+                      "el sentido de cada línea se tomó del saldo. El libro no registra ninguna entrada en el mes.")
     if totales is not None:
         deb = sum((a.debito_usd for a in asientos), CERO)
         cre = sum((a.credito_usd for a in asientos), CERO)
@@ -276,4 +313,4 @@ def leer_libro(ruta: Path) -> LibroBanco:
             difs.append(f"Totales del Mayor: débitos {totales[0]} / créditos {totales[1]} vs. suma de las líneas "
                         f"{deb} / {cre}")
     return LibroBanco(archivo=ruta.name, asientos=asientos, saldo_inicial_usd=ini,
-                      saldo_final_usd=saldo, diferencias_saldo=difs, filas_ignoradas=ignoradas)
+                      saldo_final_usd=saldo, diferencias_saldo=difs, filas_ignoradas=ignoradas, avisos=avisos)

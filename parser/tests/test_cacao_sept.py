@@ -36,3 +36,21 @@ def test_libro_reporte():
 def test_pdf_con_extension_de_excel():
     with pytest.raises(ValueError, match="es un PDF con extensión de Excel"):
         leer_libro(FIX / "sistema_efectivo.xls")
+
+
+def test_mayor_sin_columna_de_debitos():
+    """Sept. 2026: el Mayor omite la columna Débitos (mes sin entradas) y todo queda corrido a la izquierda."""
+    for mayor, reporte, ini, fin in [("mayor_banplus.xls", "sistema_banplus.xls", "583.70", "-7306.03"),
+                                     ("mayor_plaza.xls", "sistema_plaza.xls", "67.54", "-19949.44")]:
+        m = leer_libro(FIX / mayor)
+        assert (m.saldo_inicial_usd, m.saldo_final_usd) == (D(ini), D(fin))
+        assert not m.diferencias_saldo and not any(a.debito_usd for a in m.asientos) and m.avisos
+        r = leer_libro(FIX / reporte)
+        clave = lambda l: sorted((a.fecha, a.monto_bs, a.credito_usd) for a in l.asientos)
+        assert clave(m) == clave(r)                    # mismos asientos que el export «reporte»
+
+
+def test_referencia_como_texto_con_coma():
+    m = leer_libro(FIX / "mayor_banplus.xls")
+    (a,) = [a for a in m.asientos if a.fila == 22]
+    assert a.monto_bs == D("152637.69")
