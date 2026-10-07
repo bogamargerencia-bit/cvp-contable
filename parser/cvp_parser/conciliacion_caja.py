@@ -374,13 +374,15 @@ def conciliar_caja(cierre: CierreCaja, clasificados: dict[str, list[MovClasifica
 
     # ---------------------------------------------------------------- Pago móvil por total diario
     def por_total_diario(items_de_medio: list[ItemCaja], banco: str) -> None:
-        bloques: dict[dt.date, list[ItemCaja]] = {}
-        for i in items_de_medio:
-            bloques.setdefault(_dia_abono(i.fecha), []).append(i)
         creditos: dict[dt.date, list[MovClasificado]] = {}
         for x in clasificados.get(banco, []):
             if x.naturaleza == E_PAGO_MOVIL and x.mov.credito and libre(banco, x):
                 creditos.setdefault(x.mov.fecha_contable, []).append(x)
+        # El fin de semana se cruza con el lunes solo si el banco no abonó ese mismo día
+        # (agosto: Banplus abonaba el lunes; septiembre: abona el sábado y el domingo).
+        bloques: dict[dt.date, list[ItemCaja]] = {}
+        for i in items_de_medio:
+            bloques.setdefault(i.fecha if i.fecha in creditos else _dia_abono(i.fecha), []).append(i)
         for dia in sorted(bloques):
             items = bloques[dia]
             caja = sum((i.monto_bs for i in items), CERO)

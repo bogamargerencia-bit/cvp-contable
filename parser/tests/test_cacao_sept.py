@@ -66,3 +66,14 @@ def test_banplus_sept_archivo_sin_dos_movimientos():
     assert r.estado.value == "no_cuadra"
     assert [d.tipo.value for d in r.diferencias] == ["saldo_linea", "saldo_linea", "nuevo_saldo"]
     assert "diferencia 2.557,25" in r.diferencias[-1].mensaje
+
+
+def test_pago_movil_fin_de_semana_mismo_dia():
+    """Sept. 2026: Banplus abona el pago móvil el mismo sábado/domingo; no se debe correr al lunes."""
+    from cvp_parser.proceso import procesar_cliente
+    from cvp_parser.revision import aplicar
+    rep = procesar_cliente("CACAO", "2026-09", [("BANPLUS", FIX / "edo_banplus.xlsx", FIX / "mayor_banplus.xls")],
+                           cierre_caja=FIX / "ventas.xlsx")
+    pm = [l for l in rep.caja.lineas if l.items[0].medio == "Pago móvil"]
+    assert len(pm) == 30 and sum(l.estado.value == "Conciliado" for l in pm) == 20
+    assert not [p for p in aplicar(rep).pendientes if p.tipo == "Cobros sin día de caja"]
