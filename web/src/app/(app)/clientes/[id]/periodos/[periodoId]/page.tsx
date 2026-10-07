@@ -5,7 +5,7 @@ import { Refresco } from "@/components/refresco";
 import { Subida } from "@/components/subida";
 import { perfilActual } from "@/lib/sesion";
 import { crearClienteServidor } from "@/lib/supabase/server";
-import { MESES, nombreBanco, type Cuenta } from "@/lib/tipos";
+import { MESES, MINUTOS_EN_COLA, ahoraMs, nombreBanco, type Cuenta } from "@/lib/tipos";
 import { cambiarEstadoPeriodo, procesar } from "./actions";
 
 type Archivo = {
@@ -76,7 +76,10 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
   const archivos = (archivosD ?? []) as unknown as Archivo[];
   const corridas = (corridasD ?? []) as unknown as Corrida[];
   const cerrado = periodo.estado === "cerrado";
-  const enCurso = corridas.some((c) => c.estado === "pendiente" || c.estado === "procesando");
+  const ahora = ahoraMs();
+  const atascada = (c: Corrida) =>
+    c.estado === "pendiente" && ahora - new Date(c.creada_en).getTime() > MINUTOS_EN_COLA * 60_000;
+  const enCurso = corridas.some((c) => (c.estado === "pendiente" && !atascada(c)) || c.estado === "procesando");
   const archivo = (tipo: string, cuentaId: string | null) =>
     archivos.filter((a) => a.tipo === tipo && a.cuenta_id === cuentaId).sort((a, b) => b.subido_en.localeCompare(a.subido_en))[0];
 
@@ -204,7 +207,7 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
           {corridas.length === 0 ? (
             <p className="tarjeta p-4 text-sm text-tenue">Todavía no se ha procesado este período.</p>
           ) : (
-            corridas.map((c) => <TarjetaCorrida key={c.id} c={c} />)
+            corridas.map((c) => <TarjetaCorrida key={c.id} c={c} atascada={atascada(c)} />)
           )}
         </section>
       </div>
@@ -212,7 +215,7 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
   );
 }
 
-function TarjetaCorrida({ c }: { c: Corrida }) {
+function TarjetaCorrida({ c, atascada }: { c: Corrida; atascada: boolean }) {
   const [txt, cls] = ESTADO_CORRIDA[c.estado];
   const r = c.resumen;
   return (
@@ -231,6 +234,11 @@ function TarjetaCorrida({ c }: { c: Corrida }) {
         )}
       </div>
       {c.error && <p className="msg-error mt-3">{c.error}</p>}
+      {atascada && (
+        <p className="msg-error mt-3">
+          Lleva más de {MINUTOS_EN_COLA} minutos en cola: el servicio no la tomó. Pulsa «Procesar» para intentarlo de nuevo.
+        </p>
+      )}
       {r && (
         <div className="mt-3 space-y-3 text-sm">
           <table className="tabla">

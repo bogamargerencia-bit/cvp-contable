@@ -188,11 +188,12 @@ def nombre_excel(e: Entrada, numero: int) -> str:
 
 
 # ---------------------------------------------------------------- orquestación con Supabase
-def procesar_corrida(sb, corrida_id: str) -> None:
-    """Ejecuta la corrida y deja el resultado (o el error) en la tabla corridas."""
+def procesar_corrida(sb, corrida_id: str) -> bool:
+    """Ejecuta la corrida y deja el resultado (o el error) en la tabla corridas.
+    Devuelve False si la corrida no estaba pendiente (no existe o ya la tomó otro proceso)."""
     filtro = {"id": f"eq.{corrida_id}"}
     if not sb.reclamar("corridas", {"id": f"eq.{corrida_id}", "estado": "eq.pendiente"}, {"estado": "procesando"}):
-        return                                    # no existe o ya la tomó otro proceso
+        return False                              # no existe o ya la tomó otro proceso
     corrida = sb.uno("corridas", id=f"eq.{corrida_id}", select="*")
     try:
         periodo = sb.uno("periodos", id=f"eq.{corrida['periodo_id']}", select="*")
@@ -223,3 +224,4 @@ def procesar_corrida(sb, corrida_id: str) -> None:
                                        "terminada_en": dt.datetime.now(dt.timezone.utc).isoformat()})
         if not isinstance(ex, ErrorCorrida):
             raise
+    return True

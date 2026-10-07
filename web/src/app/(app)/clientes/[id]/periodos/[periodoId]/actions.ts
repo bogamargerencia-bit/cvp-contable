@@ -3,8 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { perfilActual } from "@/lib/sesion";
+import { MINUTOS_EN_COLA } from "@/lib/tipos";
 import { crearClienteAdmin } from "@/lib/supabase/admin";
 import { crearClienteServidor } from "@/lib/supabase/server";
+
+const MENSAJE_ATASCADA =
+  `El servicio no tomó la corrida en ${MINUTOS_EN_COLA} minutos (¿variables de Railway o servicio detenido?). Vuelve a procesar.`;
 
 function ruta(clienteId: string, periodoId: string) {
   return `/clientes/${clienteId}/periodos/${periodoId}`;
@@ -24,6 +28,12 @@ export async function procesar(f: FormData) {
   const { data: periodo } = await supabase.from("periodos").select("id, estado").eq("id", periodoId).maybeSingle();
   if (!periodo) volver(r, "error", "Período no encontrado");
   if (periodo.estado === "cerrado") volver(r, "error", "El período está cerrado");
+
+  // Una corrida que lleva más de MINUTOS_EN_COLA sin que el servicio la tome se da por fallida.
+  const limite = new Date(Date.now() - MINUTOS_EN_COLA * 60_000).toISOString();
+  await crearClienteAdmin().from("corridas")
+    .update({ estado: "error", error: MENSAJE_ATASCADA, terminada_en: new Date().toISOString() })
+    .eq("periodo_id", periodoId).eq("estado", "pendiente").lt("creada_en", limite);
 
   const { data: enCurso } = await supabase.from("corridas").select("id")
     .eq("periodo_id", periodoId).in("estado", ["pendiente", "procesando"]).limit(1);
@@ -50,7 +60,10 @@ export async function procesar(f: FormData) {
         signal: AbortSignal.timeout(15000),
         cache: "no-store",
       });
-      if (resp.status !== 202) fallo = `El servicio respondió ${resp.status}.`;
+      if (resp.status !== 202) {
+        const cuerpo = await resp.json().catch(() => null);
+        fallo = typeof cuerpo?.detail === "string" ? cuerpo.detail : `El servicio respondió ${resp.status}.`;
+      }
     } catch {
       fallo = "No se pudo contactar al servicio de procesamiento (¿está encendido en Railway?).";
     }

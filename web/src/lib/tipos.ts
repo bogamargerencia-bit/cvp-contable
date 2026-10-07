@@ -66,3 +66,11 @@ export const MESES = [
 export function nombreBanco(codigo: string | null): string {
   return BANCOS.find((b) => b.codigo === codigo)?.nombre ?? codigo ?? "—";
 }
+
+/** Minutos que una corrida puede quedar «en cola» antes de darla por no tomada por el servicio. */
+export const MINUTOS_EN_COLA = 3;
+
+/** Hora actual (servidor). Separada para que los componentes no llamen a Date.now() directamente. */
+export function ahoraMs(): number {
+  return Date.now();
+}
