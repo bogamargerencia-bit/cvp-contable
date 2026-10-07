@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Mensajes } from "@/components/mensajes";
+import { Barra } from "@/components/barra";
+import { BotonEnviar } from "@/components/boton-enviar";
 import { Refresco } from "@/components/refresco";
 import { Subida } from "@/components/subida";
 import { perfilActual } from "@/lib/sesion";
@@ -37,6 +39,8 @@ type Corrida = {
   resumen: Resumen | null;
   excel_path: string | null;
   error: string | null;
+  etapa: string | null;
+  avance: number;
   creada_en: string;
   terminada_en: string | null;
   autor: { nombre: string | null; email: string } | null;
@@ -67,7 +71,7 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
       .select("id, cuenta_id, tipo, nombre_original, tamano, subido_en, autor:perfiles!archivos_subido_por_fkey(nombre, email)")
       .eq("periodo_id", periodoId).eq("vigente", true),
     supabase.from("corridas")
-      .select("id, numero, estado, ok_general, resumen, excel_path, error, creada_en, terminada_en, autor:perfiles!corridas_creada_por_fkey(nombre, email)")
+      .select("id, numero, estado, ok_general, resumen, excel_path, error, etapa, avance, creada_en, terminada_en, autor:perfiles!corridas_creada_por_fkey(nombre, email)")
       .eq("periodo_id", periodoId).order("numero", { ascending: false }),
   ]);
   if (!cliente || !periodo) notFound();
@@ -113,7 +117,7 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
 
   return (
     <>
-      <Refresco activo={enCurso} />
+      <Refresco activo={enCurso} cadaMs={2000} />
       <Link href={`/clientes/${id}`} className="text-sm text-tenue hover:text-acento">
         ← {cliente.nombre_comercial ?? cliente.nombre}
       </Link>
@@ -194,7 +198,7 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
             <form action={procesar} className="flex flex-wrap items-center gap-3">
               <input type="hidden" name="cliente_id" value={id} />
               <input type="hidden" name="periodo_id" value={periodoId} />
-              <button className="boton" disabled={!puedeProcesar}>Procesar</button>
+              <BotonEnviar texto="Procesar" enviando="Enviando…" deshabilitado={!puedeProcesar} />
               <span className="text-xs text-tenue">
                 {cerrado ? "Período cerrado." : enCurso ? "Hay una corrida en proceso…"
                   : bancosIncompletos.length ? "Completa o quita los archivos marcados con ✗."
@@ -233,6 +237,19 @@ function TarjetaCorrida({ c, atascada }: { c: Corrida; atascada: boolean }) {
           <a href={`/descargar/${c.id}`} className="boton-sec ml-auto">Descargar Excel</a>
         )}
       </div>
+      {(c.estado === "pendiente" && !atascada) && (
+        <div className="mt-3 space-y-2">
+          <Barra etiqueta="En cola: esperando al servicio de procesamiento…" />
+        </div>
+      )}
+      {c.estado === "procesando" && (
+        <div className="mt-3 space-y-2">
+          <Barra valor={c.avance} etiqueta={c.etapa ?? "Procesando…"} />
+          <p className="text-xs text-tenue">
+            El proceso corre en el servidor: puedes cerrar esta página y volver luego; no se interrumpe.
+          </p>
+        </div>
+      )}
       {c.error && <p className="msg-error mt-3">{c.error}</p>}
       {atascada && (
         <p className="msg-error mt-3">

@@ -49,8 +49,10 @@ def _seguro(nombre: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", s).strip("_") or "archivo"
 
 
-def armar_entrada(cliente: dict, periodo: dict, archivos: list[dict], descargar, carpeta: Path) -> Entrada:
-    """archivos: filas de `archivos` (vigentes) con `cuenta` embebida. descargar(ruta) → bytes."""
+def armar_entrada(cliente: dict, periodo: dict, archivos: list[dict], descargar, carpeta: Path,
+                  avisar=None) -> Entrada:
+    """archivos: filas de `archivos` (vigentes) con `cuenta` embebida. descargar(ruta) → bytes.
+    avisar(i, n, nombre): opcional, se llama antes de descargar cada archivo (para la barra de avance)."""
     clave = cliente.get("clave_config") or cliente["nombre"]
     e = Entrada(clave, f"{periodo['anio']}-{periodo['mes']:02d}")
 
@@ -63,7 +65,11 @@ def armar_entrada(cliente: dict, periodo: dict, archivos: list[dict], descargar,
                             f"se usó el más reciente ({a['nombre_original']}).")
         por_clave[k] = a
 
+    total = len(por_clave)          # aproximado: algún archivo puede no usarse
+
     def local(a: dict) -> Path:
+        if avisar:
+            avisar(min(len(e.archivos_usados) + 1, total), total, a["nombre_original"])
         datos = descargar(a["storage_path"])
         if hashlib.sha256(datos).hexdigest() != a["sha256"]:
             raise ErrorCorrida(f"El archivo «{a['nombre_original']}» no coincide con el que se subió "
@@ -115,12 +121,16 @@ def armar_entrada(cliente: dict, periodo: dict, archivos: list[dict], descargar,
     return e
 
 
-def ejecutar(e: Entrada, salida: Path) -> tuple[ReporteCliente, ResultadoRevision]:
+def ejecutar(e: Entrada, salida: Path, paso=None) -> tuple[ReporteCliente, ResultadoRevision]:
+    paso = paso or (lambda etapa, avance: None)
     anterior = leer_revision(e.revision) if e.revision else None
+    paso(f"Leyendo, cuadrando y conciliando {len(e.bancos)} banco(s)"
+         + (", caja" if e.cierre_caja else "") + (" y divisas" if e.divisas else ""), 45)
     rep = procesar_cliente(e.cliente, e.periodo, e.bancos, cierre_caja=e.cierre_caja,
                            correcciones_caja=correcciones_caja(anterior) if anterior else None,
                            libros_divisas=e.divisas or None, kardex=e.kardex if e.divisas else None)
     rv = aplicar(rep, anterior)
+    paso("Generando el Excel de revisión", 80)
     excel_conciliacion(rep, salida, rv)
     return rep, rv
 
@@ -195,6 +205,15 @@ def procesar_corrida(sb, corrida_id: str) -> bool:
     if not sb.reclamar("corridas", {"id": f"eq.{corrida_id}", "estado": "eq.pendiente"}, {"estado": "procesando"}):
         return False                              # no existe o ya la tomó otro proceso
     corrida = sb.uno("corridas", id=f"eq.{corrida_id}", select="*")
+
+    def paso(etapa: str, avance: int) -> None:
+        """Guarda la etapa para la barra de avance de la web. Si falla, no detiene la corrida."""
+        try:
+            sb.update("corridas", filtro, {"etapa": etapa, "avance": avance})
+        except Exception:                          # noqa: BLE001
+            pass
+
+    paso("Preparando", 5)
     try:
         periodo = sb.uno("periodos", id=f"eq.{corrida['periodo_id']}", select="*")
         if periodo["estado"] == "cerrado":
@@ -204,17 +223,19 @@ def procesar_corrida(sb, corrida_id: str) -> bool:
                              select="*,cuenta:cuentas(*)")
         with tempfile.TemporaryDirectory() as tmp:
             carpeta = Path(tmp)
-            e = armar_entrada(cliente, periodo, archivos, sb.descargar, carpeta)
+            e = armar_entrada(cliente, periodo, archivos, sb.descargar, carpeta,
+                              avisar=lambda i, n, nom: paso(f"Descargando archivos ({i} de {n}): {nom}", 5 + 35 * i // n))
             salida = carpeta / nombre_excel(e, corrida["numero"])
             try:
-                rep, rv = ejecutar(e, salida)
+                rep, rv = ejecutar(e, salida, paso)
             except (ValueError, KeyError) as ex:      # errores de lectura del parser
                 raise ErrorCorrida(f"El parser no pudo leer los archivos: {ex}") from ex
             ruta = f"{cliente['id']}/{periodo['id']}/corridas/{salida.name}"
+            paso("Guardando el Excel y los resultados", 90)
             sb.subir(ruta, salida.read_bytes(), XLSX)
         sb.insert("partidas", partidas(corrida_id, rv))
         sb.update("corridas", filtro, {
-            "estado": "lista", "ok_general": rv.ok_general, "resumen": resumen(rep, rv, e),
+            "estado": "lista", "etapa": "Terminada", "avance": 100, "ok_general": rv.ok_general, "resumen": resumen(rep, rv, e),
             "excel_path": ruta, "archivos": e.archivos_usados, "error": None,
             "terminada_en": dt.datetime.now(dt.timezone.utc).isoformat(),
         })

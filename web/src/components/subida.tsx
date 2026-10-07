@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Barra } from "@/components/barra";
 import { crearClienteNavegador } from "@/lib/supabase/client";
 
 const MAX_MB = 50;
@@ -33,6 +34,18 @@ export function Subida(props: {
   const input = useRef<HTMLInputElement>(null);
   const [estado, setEstado] = useState<"" | "subiendo" | "error">("");
   const [msg, setMsg] = useState("");
+  const [etapa, setEtapa] = useState("");
+
+  // Mientras sube, el navegador pide confirmación antes de cerrar o salir de la página.
+  useEffect(() => {
+    if (estado !== "subiendo") return;
+    const avisar = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", avisar);
+    return () => window.removeEventListener("beforeunload", avisar);
+  }, [estado]);
 
   async function subir(f: File) {
     setMsg("");
@@ -50,10 +63,13 @@ export function Subida(props: {
     setEstado("subiendo");
     try {
       const sb = crearClienteNavegador();
+      setEtapa("Verificando el archivo…");
       const huella = await sha256(f);
+      setEtapa(`Subiendo ${f.name}…`);
       const ruta = `${props.clienteId}/${props.periodoId}/${crypto.randomUUID()}-${nombreSeguro(f.name)}`;
       const up = await sb.storage.from("archivos").upload(ruta, f, { contentType: f.type || undefined, upsert: false });
       if (up.error) throw new Error("No se pudo subir el archivo");
+      setEtapa("Registrando…");
       const { data, error } = await sb
         .from("archivos")
         .insert({
@@ -85,7 +101,8 @@ export function Subida(props: {
   }
 
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex flex-col items-end gap-1.5">
+      <span className="inline-flex items-center gap-2">
       <input
         ref={input}
         type="file"
@@ -101,6 +118,12 @@ export function Subida(props: {
       >
         {estado === "subiendo" ? "Subiendo…" : props.reemplaza ? "Reemplazar" : "Subir"}
       </button>
+      </span>
+      {estado === "subiendo" && (
+        <span className="block w-56">
+          <Barra etiqueta={etapa || "Subiendo…"} />
+        </span>
+      )}
       {msg && <span className="text-xs text-alerta">{msg}</span>}
     </span>
   );

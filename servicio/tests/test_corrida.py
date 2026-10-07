@@ -159,6 +159,7 @@ def test_wei_completo():
     r = sb.corrida(p)
     procesar_corrida(sb, r["id"])
     assert r["estado"] == "lista", r.get("error")
+    assert (r["etapa"], r["avance"]) == ("Terminada", 100)
     res = r["resumen"]
     assert [b["banco"] for b in res["bancos"]] == ["100_BANCO", "BANPLUS", "BNC"]
     assert len(res["divisas"]) == 4 and all(d["ventas_ok"] for d in res["divisas"])

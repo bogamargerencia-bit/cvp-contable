@@ -63,3 +63,13 @@ body {
   .msg-error { @apply rounded-md border border-alerta/30 bg-alerta-suave px-3 py-2 text-sm text-alerta; }
   .msg-ok { @apply rounded-md border border-acento/30 bg-acento-suave px-3 py-2 text-sm text-acento; }
 }
+
+/* Barra de avance indeterminada (subidas y corridas en cola). */
+@keyframes barra-indeterminada {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+.barra-indeterminada { animation: barra-indeterminada 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .barra-indeterminada { animation: none; width: 100%; opacity: 0.5; }
+}
