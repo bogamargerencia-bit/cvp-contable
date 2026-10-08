@@ -317,6 +317,7 @@ def leer_libro(ruta: Path) -> LibroBanco:
     saldo_anterior: Optional[Decimal] = None
     totales: Optional[tuple[Decimal, Decimal]] = None
     sin_debitos = False                        # Mayor sin columna de débitos (ver más abajo)
+    avisos_corrimiento = False                 # se detectó por las filas, no por la línea «Cuenta:»
     totales_corridos: Optional[tuple[Decimal, Decimal]] = None
     ultimo_es_asiento = False
     for r in range(f_enc + 1, len(filas)):
@@ -328,11 +329,13 @@ def leer_libro(ruta: Path) -> LibroBanco:
             if textos == ENCABEZADO:                                  # encabezado de otra página
                 continue
             if textos[0] == "Cuenta:":
-                if textos[6].startswith("Saldo Anterior") and v[7] != "":
-                    saldo_anterior = monto_excel(v[7])
-                elif textos[5].startswith("Saldo Anterior") and v[6] != "":
+                # El corrimiento se detecta por la POSICIÓN de la etiqueta, no por el valor: una cuenta que
+                # arranca sin saldo en el sistema trae «Saldo Anterior:» vacío (Shiro, Bancamiga sept. 2026).
+                if textos[6].startswith("Saldo Anterior"):
+                    saldo_anterior = monto_excel(v[7]) if v[7] != "" else CERO
+                elif textos[5].startswith("Saldo Anterior"):
                     # Mes sin débitos: el sistema omite esa columna y todo queda corrido a la izquierda.
-                    saldo_anterior = monto_excel(v[6])
+                    saldo_anterior = monto_excel(v[6]) if v[6] != "" else CERO
                     sin_debitos = True
                 continue
             if textos[3] in ("Sub Total:", "Totales:"):
@@ -349,6 +352,9 @@ def leer_libro(ruta: Path) -> LibroBanco:
                 ignoradas.append(f"fila {r + 1}: {[c for c in v if c != '']}")
             continue
         ultimo_es_asiento = True
+        if not sin_debitos and v[7] == "" and v[6] != "" and v[5] == "" and v[4] != "":
+            sin_debitos = True
+            avisos_corrimiento = True
         fecha = v[0]
         comp = str(int(v[1])) if isinstance(v[1], (int, float)) else str(v[1]).strip()
         ref_raw = v[2]
@@ -412,6 +418,9 @@ def leer_libro(ruta: Path) -> LibroBanco:
             difs.append(f"Totales del Mayor (sin columna de débitos): monto {totales_corridos[0]} / saldo "
                         f"{totales_corridos[1]} vs. suma de las líneas {movido} / saldo calculado {saldo}")
     avisos = []
+    if avisos_corrimiento:
+        avisos.append("Las columnas del Mayor vienen corridas (sin columna de débitos) y no se encontró la línea "
+                      "«Cuenta: … Saldo Anterior»: se tomaron monto y saldo de las columnas corridas.")
     if sin_debitos:
         avisos.append("El Mayor no trae columna de débitos (el sistema la omite cuando el mes no tiene entradas): "
                       "el sentido de cada línea se tomó del saldo. El libro no registra ninguna entrada en el mes.")
