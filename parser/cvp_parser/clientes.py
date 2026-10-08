@@ -71,6 +71,15 @@ CLIENTES: dict[str, ConfigCliente] = {
                            [("BANPLUS", r"PUNTO DE VENTAS"), ("PLAZA", r"PUNTO DE VENTAS")]),
         ],
     ),
+    "SHIRO": ConfigCliente(
+        nombre="SHIRO ALIMENTOS, C.A.",
+        # Sin cierre de caja: las ventas del mes salen del Kardex (PDF) y se controlan contra el asiento mensual
+        # («INGRESO POR VENTAS AGOSTO 2026», agosto 2026).
+        divisas=[
+            CuentaDivisa("Efectivo $", None, "DIVISAS", asiento_ventas=r"INGRESO POR VENTAS|VTAS", ventas_del_kardex=True),
+            CuentaDivisa("Zelle", None, "ZELLE", asiento_ventas=r"INGRESO POR VENTAS|VTAS", ventas_del_kardex=True),
+        ],
+    ),
 }
 
 
