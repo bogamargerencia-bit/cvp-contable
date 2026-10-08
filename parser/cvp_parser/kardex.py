@@ -62,6 +62,19 @@ def _n(t: object) -> str:
     return re.sub(r"\s+", " ", str(t or "")).strip().upper()
 
 
+def _fecha_texto(t: Optional[str], anio: int) -> Optional[dt.date]:
+    """«07-09», «7/9», «07-09-2026» → fecha (día-mes; el año, si falta, es el del Kardex)."""
+    m = re.fullmatch(r"(\d{1,2})[-/.](\d{1,2})(?:[-/.](\d{2}|\d{4}))?", (t or "").strip())
+    if not m:
+        return None
+    a = int(m.group(3)) if m.group(3) else anio
+    a = a + 2000 if a < 100 else a
+    try:
+        return dt.date(a, int(m.group(2)), int(m.group(1)))
+    except ValueError:
+        return None
+
+
 def leer_kardex(ruta: Path, hoja: Optional[str] = None) -> Kardex:
     ruta = Path(ruta)
     wb = openpyxl.load_workbook(str(ruta), data_only=True)
@@ -134,20 +147,37 @@ def leer_kardex(ruta: Path, hoja: Optional[str] = None) -> Kardex:
     f_fondo = next((r for r in range(fin_dias, ws.max_row + 1)
                     if any("FONDO DE EFECTIVO" in _n(c.value) for c in ws[r])), None)
     if f_fondo:
+        anio = actual.year if actual else dt.date.today().year
         for r in range(f_fondo + 1, ws.max_row + 1):
             vals = [ws.cell(r, c).value for c in range(1, 8)]
-            t = [_n(v) for v in vals if isinstance(v, str)]
+            textos = [v.strip() for v in vals if isinstance(v, str) and v.strip()]
+            t = [_n(v) for v in textos]
             fecha = next((v.date() for v in vals if isinstance(v, dt.datetime)), None)
+            fecha_txt = None
+            if fecha is None:            # fecha escrita como texto («07-09», «07/09/2026»), en cualquier columna
+                fecha_txt = next((x for x in textos if _fecha_texto(x, anio)), None)
+                fecha = _fecha_texto(fecha_txt, anio) if fecha_txt else None
             nums = [monto(v) for v in vals if isinstance(v, (int, float)) and not isinstance(v, bool)]
             nums = [n for n in nums if n is not None]
             if "VIENEN" in t and nums:
                 saldo_ini["FONDO"] = nums[-1]
             elif fecha and nums:
-                etiqueta = next((x for x in t if x and x != "NRO."), "")
-                movs.append(MovKardex(r, fecha, "FONDO", nums[-1],
-                                      f"Fondo de efectivo {etiqueta}".strip(), "fondo"))
+                etiqueta = next((_n(x) for x in textos if x != fecha_txt and _n(x) != "NRO."), "")
+                movs.append(MovKardex(r, fecha, "FONDO", nums[-1], f"Fondo de efectivo {etiqueta}".strip(), "fondo"))
+                if fecha_txt:
+                    errores.append(f"Fondo de efectivo, fila {r}: la fecha está escrita como texto («{fecha_txt}»); "
+                                   f"se leyó como {fecha:%d/%m/%Y}.")
             elif not fecha and nums and not t and "FONDO" in saldo_ini and "FONDO" not in disponible:
                 disponible["FONDO"] = nums[-1]          # total al pie de la sección
+                break                                   # lo que sigue son notas, no movimientos
+        # Control: VIENEN + movimientos = total al pie. Si no, hay una fila que no se pudo leer.
+        if "FONDO" in saldo_ini and "FONDO" in disponible:
+            suma = sum((m.monto for m in movs if m.medio == "FONDO"), CERO)
+            calc = saldo_ini["FONDO"] + suma
+            if calc != disponible["FONDO"]:
+                errores.append(f"La sección FONDO DE EFECTIVO no cuadra: VIENEN {saldo_ini['FONDO']} + movimientos "
+                               f"{suma} = {calc}, pero el total al pie es {disponible['FONDO']} (diferencia "
+                               f"{disponible['FONDO'] - calc}). Hay alguna fila que no se pudo leer (¿sin fecha?).")
     return Kardex(ruta.name, ws.title, movs, saldo_ini, disponible, errores)
 
 

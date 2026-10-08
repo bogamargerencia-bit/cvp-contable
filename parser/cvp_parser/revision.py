@@ -282,6 +282,11 @@ def pendientes(rep: ReporteCliente) -> list[Pendiente]:
             if kx is not None and lib != kx:
                 agregar(n, "Libro", f"Divisas: saldo {nombre_s} libro ≠ Kardex", None, n, None, lib - kx,
                         f"Libro US$ {lib} · Kardex US$ {kx}", "Corregido / Justificado")
+    if rep.kardex is not None:
+        for err in rep.kardex.errores:
+            tipo = "Kardex: aviso de lectura" if "se leyó como" in err else "Kardex con errores"
+            agregar("KARDEX", "Caja", tipo, None, err[:200], None, None, f"Archivo {rep.kardex.archivo}",
+                    "Aceptar" if tipo.endswith("lectura") else "Corregido en el sistema")
     for txt in rep.cruces_divisas_bancos:
         if "diferencia US$ 0.00" not in txt:
             agregar("DIVISAS", "Libro", "Venta de divisas: el banco la registra a otra tasa", None, txt[:120],

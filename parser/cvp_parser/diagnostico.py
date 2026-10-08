@@ -432,6 +432,15 @@ GENERICO: dict[str, tuple[str, str, str]] = {
         "El banco registró la venta de divisas a una tasa distinta de la que usa el libro.",
         "Indicar la tasa usada o corregir el asiento.", "Justificado"),
 }
+GENERICO["Kardex: aviso de lectura"] = (
+    "El Kardex tiene una fila escrita distinto de las demás (p. ej. la fecha como texto o en otra columna). "
+    "La app la leyó igual; revisa que la fecha que tomó sea la correcta.",
+    "Si la fecha leída es correcta, «Aceptar». Para el próximo mes, escribir la fecha como fecha en su columna.",
+    "Aceptar")
+GENERICO["Kardex con errores"] = (
+    "El Kardex no se pudo leer completo o una de sus secciones no suma su propio total: hay movimientos que la "
+    "app no está viendo.",
+    "Corregir esa fila del Kardex (fecha y monto en sus columnas) y volver a subirlo.", "Corregido en el sistema")
 GENERICO_DIVISAS = ("Diferencia entre el libro de divisas, el cierre de caja y el Kardex.",
                     "Revisar cuál de los tres está mal y corregirlo (o justificar).", "Justificado")
 GENERICO_OTRO = ("Partida que la conciliación no pudo cerrar.", "Revisar el detalle técnico.", "Justificado")
