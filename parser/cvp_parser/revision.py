@@ -40,8 +40,10 @@ from .proceso import ReporteCliente
 
 VERSION = "cvp-revision-1"
 TIPO_CORRECCION = "Caja: corrección de fecha propuesta"
-ABREV = {"100_BANCO": "100", "BNC": "BNC", "BANPLUS": "BPL", "PLAZA": "PLZ", "BANPLUS+PLAZA": "BPZ"}
-NOMBRE = {"100_BANCO": "100%", "BNC": "BNC", "BANPLUS": "Banplus", "PLAZA": "Plaza"}
+ABREV = {"100_BANCO": "100", "BNC": "BNC", "BANPLUS": "BPL", "PLAZA": "PLZ", "BANPLUS+PLAZA": "BPZ",
+         "VENEZOLANO": "VNZ", "BANCAMIGA": "BAM"}
+NOMBRE = {"100_BANCO": "100%", "BNC": "BNC", "BANPLUS": "Banplus", "PLAZA": "Plaza",
+          "VENEZOLANO": "Venezolano", "BANCAMIGA": "Bancamiga"}
 
 
 class Decision(str, Enum):

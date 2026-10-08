@@ -19,7 +19,7 @@ from typing import Optional
 
 import xlrd
 
-from .montos import CERO, MontoInvalido, monto_excel, monto_ve
+from .montos import CERO, MontoInvalido, monto_excel, monto_us, monto_ve
 
 
 @dataclass
@@ -179,6 +179,115 @@ def _leer_reporte(ruta: Path, filas: list[list], f_enc: int) -> LibroBanco:
                       filas_ignoradas=ignoradas, avisos=avisos)
 
 
+_AMT_PDF = r"-?\d{1,3}(?:,\d{3})*\.\d{2}"
+_FILA_PDF = re.compile(r"^(\d{2}/\d{2}/\d{4})\s+(\d+)\s+(\S+)\s+(.*?)\s*(" + _AMT_PDF + r")\s+(" + _AMT_PDF + r")\s*$")
+_PIE_PDF = re.compile(r"Empresa:|Usuario:|Mayor Analitico|Desde la Fecha|Contacto:|Fecha:|Página:|^\s*J-\d")
+
+
+def _leer_mayor_pdf(ruta: Path) -> LibroBanco:
+    """Mayor Analítico impreso a PDF (Shiro: «MOVIMIENTOS DEL SISTEMA …» / «MAYOR DE MOVIMIENTOS …»).
+
+    Mismas columnas que el export en Excel: Fecha | Compro | Referencia | Cuenta (descripción) | Debitos |
+    Creditos | Saldo Mes | Saldo, en US$. Débito o crédito se decide por la POSICIÓN del monto bajo el
+    encabezado de cada página; luego se verifica con el saldo de cada línea y con los «Totales:» impresos.
+    La descripción puede seguir en las líneas siguientes (incluso en la página siguiente).
+    Debe traer UNA sola cuenta: un mayor con varias cuentas (p. ej. todas las de gasto) se rechaza.
+    """
+    import subprocess
+    t = subprocess.run(["pdftotext", "-layout", str(ruta), "-"], capture_output=True, text=True, check=True).stdout
+    if "Mayor Analitico" not in t or not re.search(r"Debitos\s+Creditos", t):
+        raise ValueError(f"{ruta.name}: es un PDF pero no es un Mayor Analítico del sistema; sube el export en "
+                         "Excel o el Mayor Analítico de la cuenta en PDF.")
+    cuentas = re.findall(r"Cuenta:\s+(\d+)\s+(.+?)\s{2,}Saldo Anterior:[ \t]*(" + _AMT_PDF + ")?", t)
+    if len(cuentas) != 1:
+        nombres = ", ".join(f"{c[0]} {c[1].strip()}" for c in cuentas[:4])
+        raise ValueError(f"{ruta.name}: el Mayor trae {len(cuentas)} cuentas ({nombres}{'…' if len(cuentas) > 4 else ''}); "
+                         "exporta el Mayor Analítico de UNA sola cuenta (la del banco o la divisa).")
+    saldo_anterior = monto_us(cuentas[0][2]) if cuentas[0][2] else CERO
+
+    asientos: list[AsientoLibro] = []
+    ignoradas: list[str] = []
+    difs: list[str] = []
+    totales: list[Decimal] = []
+    ult: Optional[AsientoLibro] = None
+    n_linea = 0
+    for pagina in t.split("\f"):
+        cols: Optional[dict[str, int]] = None
+        lineas = pagina.splitlines()
+        i = 0
+        while i < len(lineas):
+            linea = lineas[i]
+            n_linea += 1
+            i += 1
+            enc = re.search(r"Debitos\s+Creditos", linea)
+            if linea.startswith("Fecha") and enc:
+                cols = {"debe": linea.index("Debitos") + len("Debitos"), "haber": linea.index("Creditos") + len("Creditos")}
+                continue
+            if cols is None or not linea.strip() or linea.lstrip().startswith("Cuenta:") or _PIE_PDF.search(linea):
+                continue
+            if "Sub Total:" in linea or "Totales:" in linea:
+                ult = None
+                if "Totales:" in linea:
+                    nums = re.findall(_AMT_PDF, linea)
+                    while not nums and i < len(lineas):          # los montos van en la línea siguiente
+                        nums = re.findall(_AMT_PDF, lineas[i]); i += 1; n_linea += 1
+                    totales = [monto_us(x) for x in nums]
+                continue
+            f = _FILA_PDF.match(linea)
+            if f and cols:
+                monto, saldo = monto_us(f.group(5)), monto_us(f.group(6))
+                fin = linea.index(f.group(5), f.start(5)) + len(f.group(5))
+                es_debe = abs(fin - cols["debe"]) < abs(fin - cols["haber"])
+                ref_raw = f.group(3)
+                monto_bs, ref_banco = None, ""
+                if re.fullmatch(r"\d+\.\d{2}", ref_raw):
+                    monto_bs = Decimal(ref_raw)
+                elif re.fullmatch(r"\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}", ref_raw):
+                    monto_bs = monto_ve(ref_raw)
+                elif re.fullmatch(r"\d{6,}", ref_raw):
+                    ref_banco = ref_raw
+                ult = AsientoLibro(
+                    fila=n_linea, fecha=dt.datetime.strptime(f.group(1), "%d/%m/%Y").date(), comprobante=f.group(2),
+                    referencia=f"{monto_bs}" if monto_bs is not None else ref_raw,
+                    descripcion=re.sub(r"\s+", " ", f.group(4)).strip(),
+                    debito_usd=monto if es_debe else CERO, credito_usd=CERO if es_debe else monto,
+                    saldo_usd=saldo, monto_bs=monto_bs, referencia_banco=ref_banco)
+                asientos.append(ult)
+            elif re.match(r"^\d{2}/\d{2}/\d{4}\s", linea):
+                ignoradas.append(f"línea {n_linea}: no se pudo leer → {linea.strip()}")
+            elif ult is not None and re.match(r"^\s{20,}\S", linea) and not re.search(_AMT_PDF, linea):
+                ult.descripcion = f"{ult.descripcion} {linea.strip()}".strip(" .")
+            else:
+                ignoradas.append(f"línea {n_linea}: {linea.strip()}")
+    for a in asientos:
+        a.descripcion = re.sub(r"\s+\.$", "", re.sub(r"\s+", " ", a.descripcion)).strip()
+        if a.monto_bs is None and not a.referencia_banco:
+            a.componentes_bs = _componentes(a.descripcion)
+
+    saldo = saldo_anterior
+    for a in asientos:
+        saldo = saldo + a.debito_usd - a.credito_usd
+        if a.saldo_usd is not None and a.saldo_usd != saldo:
+            difs.append(f"línea {a.fila} ({a.descripcion}): saldo calculado {saldo} vs. Mayor {a.saldo_usd}")
+            saldo = a.saldo_usd
+    deb = sum((a.debito_usd for a in asientos), CERO)
+    cre = sum((a.credito_usd for a in asientos), CERO)
+    if not totales:
+        difs.append("No se encontraron los «Totales:» del Mayor; no se pudo verificar el total.")
+    else:
+        esperado = [x for x in (deb, cre) if x] + [saldo]
+        faltan = [x for x in esperado if x not in totales and -x not in totales]
+        if faltan:
+            difs.append(f"Totales del Mayor {[str(x) for x in totales]} no coinciden con lo leído: débitos {deb}, "
+                        f"créditos {cre}, saldo final {saldo}.")
+    avisos = ["Mayor leído desde PDF (no del export en Excel)."]
+    if not deb:
+        avisos.append("El libro no registra ninguna entrada (débitos) en el período: todas las entradas del banco "
+                      "quedarán «solo en banco». ¿Falta el asiento de ventas del cierre del mes?")
+    return LibroBanco(archivo=ruta.name, asientos=asientos, saldo_inicial_usd=saldo_anterior, saldo_final_usd=saldo,
+                      diferencias_saldo=difs, filas_ignoradas=ignoradas, avisos=avisos)
+
+
 def leer_libro(ruta: Path) -> LibroBanco:
     """Lee el libro de bancos. Tres presentaciones del mismo sistema:
     - «reporte» (CACAO sept. 2026): codcta/nombre/compro/comentario/fechatrans/…/creditos BS/creditos $;
@@ -190,7 +299,7 @@ def leer_libro(ruta: Path) -> LibroBanco:
     ruta = Path(ruta)
     with open(ruta, "rb") as fh:
         if fh.read(5) == b"%PDF-":
-            raise ValueError(f"{ruta.name}: es un PDF con extensión de Excel; sube el export en Excel del sistema.")
+            return _leer_mayor_pdf(ruta)
     celdas = _celdas(ruta)
     f_rep = next((i for i, v in enumerate(celdas[:10]) if REPORTE <= {str(c).strip().lower() for c in v}), None)
     if f_rep is not None:

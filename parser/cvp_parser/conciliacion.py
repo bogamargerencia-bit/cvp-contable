@@ -345,6 +345,8 @@ def _pistas(res: dict[str, ResultadoConciliacion], dias: int,
             if p.estado is not EstadoPartida.SOLO_LIBRO:
                 continue
             a = rx.libro.asientos[p.asientos[0]]
+            if a.monto_bs is None:          # referencia bancaria o asiento resumen: no hay monto con qué comparar
+                continue
             pistas = []
             for by, ry in res.items():
                 for q in ry.partidas:
