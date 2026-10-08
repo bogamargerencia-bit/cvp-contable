@@ -77,6 +77,9 @@ def _fecha_texto(t: Optional[str], anio: int) -> Optional[dt.date]:
 
 def leer_kardex(ruta: Path, hoja: Optional[str] = None) -> Kardex:
     ruta = Path(ruta)
+    if ruta.suffix.lower() == ".pdf":           # Kardex impreso a PDF (Shiro): ver kardex_pdf.py
+        from .kardex_pdf import leer_kardex_pdf
+        return leer_kardex_pdf(ruta)
     wb = openpyxl.load_workbook(str(ruta), data_only=True)
     ws = wb[hoja] if hoja else next(w for w in wb.worksheets if w.sheet_state == "visible")
     errores: list[str] = []

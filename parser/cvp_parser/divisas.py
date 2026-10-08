@@ -42,6 +42,9 @@ class CuentaDivisa:
     ventas_columna: Optional[str]       # regex del encabezado en el Excel de ventas (None = no recibe ventas)
     kardex_medio: Optional[str]         # DIVISAS / ZELLE / USDT / FONDO
     asiento_ventas: str = r"VTAS"       # regex (referencia o descripción) del asiento mensual de ventas
+    # Sin cierre de caja (Shiro): las ventas del mes son las «ventas del día» del Kardex, y el asiento mensual
+    # de ventas del libro se controla contra su suma.
+    ventas_del_kardex: bool = False
 
 
 @dataclass
@@ -217,5 +220,8 @@ def conciliar_cuenta(cta: CuentaDivisa, libro: LibroBanco, ventas: Optional[dict
 def conciliar_divisas(cuentas: list[CuentaDivisa], libros: dict[str, LibroBanco],
                       ventas: Optional[dict[str, dict[dt.date, Decimal]]],
                       kardex: Optional[Kardex]) -> list[ResultadoCuenta]:
-    return [conciliar_cuenta(c, libros[c.nombre], (ventas or {}).get(c.nombre) if c.ventas_columna else None,
-                             kardex) for c in cuentas if c.nombre in libros]
+    def ventas_de(c: CuentaDivisa) -> Optional[dict[dt.date, Decimal]]:
+        if c.ventas_del_kardex:
+            return kardex.ventas_dia(c.kardex_medio) if kardex is not None and c.kardex_medio else None
+        return (ventas or {}).get(c.nombre) if c.ventas_columna else None
+    return [conciliar_cuenta(c, libros[c.nombre], ventas_de(c), kardex) for c in cuentas if c.nombre in libros]

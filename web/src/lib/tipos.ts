@@ -51,16 +51,19 @@ export const BANCOS: { codigo: string; nombre: string; pendiente?: boolean }[] =
   { codigo: "BNC", nombre: "BNC" },
   { codigo: "BANPLUS", nombre: "Banplus" },
   { codigo: "PLAZA", nombre: "Banco Plaza" },
+  { codigo: "VENEZOLANO", nombre: "Venezolano de Crédito" },
+  { codigo: "BANCAMIGA", nombre: "Bancamiga" },
   { codigo: "ACTIVO", nombre: "Banco Activo", pendiente: true },
   { codigo: "MERCANTIL", nombre: "Mercantil", pendiente: true },
 ];
 
 /** Claves de configuración que existen en parser/cvp_parser/clientes.py. */
-export const CONFIGS_PARSER = ["WEI REST", "CACAO"];
+export const CONFIGS_PARSER = ["WEI REST", "CACAO", "SHIRO"];
 
 /** Nombres de las cuentas en divisas que reconoce el parser para cada configuración (clientes.py). */
 export const DIVISAS_PARSER: Record<string, string[]> = {
   "WEI REST": ["Efectivo $", "Zelle", "USDT", "Fondo de efectivo"],
+  SHIRO: ["Efectivo $", "Zelle"],
 };
 
 export const MESES = [
