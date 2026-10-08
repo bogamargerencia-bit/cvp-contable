@@ -92,6 +92,26 @@ REGLAS: dict[str, list[tuple[str, str, str]]] = {
         (r"Pago Plus Otros Bancos", D, S_PAGO_MOVIL),
         (r"Compra POS", D, S_POS),
     ],
+    "VENEZOLANO": [
+        (r"^POS DEB", C, E_POS_DEB),
+        (r"^POS CREDITO", C, E_POS_CRE),
+        (r"^REINT", C, E_REVERSO),
+        (r"PAGO MOVIL", C, E_PAGO_MOVIL),
+        (r"CREDITO INMEDIATO ABONO", C, E_TRANSF),
+        (r"^COMISION|COSTO DE OP\.PUNTO", D, S_COMISION),
+        (r"GENER\.PROC\.DE EDO|CUOTA DE MANTENIM", D, S_CARGOS),
+        (r"RETENCION I\.S\.L\.R", D, S_ISLR),
+        (r"^CRED\.INM(ED)?\.ENV", D, S_TRANSF),     # a terceros o a cuenta propia (MISMO TIT): ver marcar_traslados
+    ],
+    "BANCAMIGA": [
+        (r"Liquidaci[oó]n a Comercio TDD", C, E_POS_DEB),
+        (r"Liquidaci[oó]n a Comercio TDC", C, E_POS_CRE),
+        (r"COBRO POR PROCESAMIENTO|Comisi[oó]n", D, S_COMISION),
+        (r"Mantenimiento de Cuenta|Emision Estado de Cuenta|Envio de SMS", D, S_CARGOS),
+        (r"ND Credito Inmediato", D, S_TRANSF),
+        (r"NC Credito Inmediato|Credito Inmediato", C, E_TRANSF),
+        (r"Consumo Masterdebit", D, S_POS),
+    ],
 }
 
 

@@ -32,7 +32,8 @@ from .naturaleza import E_PAGO_MOVIL, E_POS_CRE, E_POS_DEB, E_TRANSF, ENTRADAS, 
 COBROS = {E_POS_DEB, E_POS_CRE, E_PAGO_MOVIL, E_TRANSF}
 from .proceso import ReporteCliente
 
-NOMBRE = {"100_BANCO": "100%", "BNC": "BNC", "BANPLUS": "Banplus", "PLAZA": "Plaza"}
+NOMBRE = {"100_BANCO": "100%", "BNC": "BNC", "BANPLUS": "Banplus", "PLAZA": "Plaza",
+          "VENEZOLANO": "Venezolano", "BANCAMIGA": "Bancamiga"}
 
 F = Font(name="Arial", size=10)
 B = Font(name="Arial", size=10, bold=True)

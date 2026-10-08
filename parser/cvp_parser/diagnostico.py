@@ -35,7 +35,8 @@ if TYPE_CHECKING:
     from .proceso import ReporteCliente
 
 NOMBRE = {"100_BANCO": "100% Banco", "BNC": "BNC", "BANPLUS": "Banplus", "PLAZA": "Plaza",
-          "ACTIVO": "Activo", "MERCANTIL": "Mercantil"}
+          "ACTIVO": "Activo", "MERCANTIL": "Mercantil",
+          "VENEZOLANO": "Venezolano de Crédito", "BANCAMIGA": "Bancamiga"}
 TOL_TASA = Decimal("0.03")          # ±3 % sobre la tasa del día para proponer una pareja
 DIAS_PAREJA = 3
 NO_EMPAREJAR = {S_COMISION, S_CARGOS, S_ISLR}   # cargos del banco: nunca son el pago de un asiento
