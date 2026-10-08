@@ -51,6 +51,8 @@ export const BANCOS: { codigo: string; nombre: string; pendiente?: boolean }[] =
   { codigo: "BNC", nombre: "BNC" },
   { codigo: "BANPLUS", nombre: "Banplus" },
   { codigo: "PLAZA", nombre: "Banco Plaza" },
+  { codigo: "VENEZOLANO", nombre: "Venezolano de Crédito" },
+  { codigo: "BANCAMIGA", nombre: "Bancamiga" },
   { codigo: "ACTIVO", nombre: "Banco Activo", pendiente: true },
   { codigo: "MERCANTIL", nombre: "Mercantil", pendiente: true },
 ];

@@ -10,7 +10,8 @@ parser/
     montos.py   Conversión a Decimal (formato VE 1.234,56 y US 1,234.56). Rechaza float y no redondea.
     modelo.py   Modelo común: Movimiento, TotalesBanco, Extracto, ResultadoLectura, interfaz Lector.
     cuadre.py   Validaciones contra el banco. Devuelve estado: cuadra / requiere_revision / no_cuadra.
-    lectores/   banco_100.py (PDF), bnc.py (.xls), banplus.py (.xlsx y .xls), plaza.py (PDF).
+    lectores/   banco_100.py (PDF), bnc.py (.xls), banplus.py (.xlsx y .xls), plaza.py (PDF),
+                venezolano.py (PDF), bancamiga.py (PDF).
                 Pendientes: activo.py, mercantil.py
     clientes.py Configuración por cliente: columnas de caja → banco/modo, asientos resumen → columnas.
     sistema.py  Export del libro de bancos del sistema (US$, Referencia = monto en Bs.).
