@@ -34,8 +34,10 @@ def test_libro_reporte():
 
 
 def test_pdf_con_extension_de_excel():
-    with pytest.raises(ValueError, match="es un PDF con extensión de Excel"):
-        leer_libro(FIX / "sistema_efectivo.xls")
+    """Un Mayor en PDF guardado como .xls se lee como PDF (desde el soporte de Mayor en PDF), con aviso."""
+    lib = leer_libro(FIX / "sistema_efectivo.xls")
+    assert any("PDF" in a for a in lib.avisos) and lib.asientos and not lib.diferencias_saldo
+    assert lib.saldo_inicial_usd + sum(a.debito_usd - a.credito_usd for a in lib.asientos) == lib.saldo_final_usd
 
 
 def test_mayor_sin_columna_de_debitos():
