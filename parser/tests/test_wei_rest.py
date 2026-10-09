@@ -72,8 +72,11 @@ def test_traslados_entre_cuentas_propias(rep):
 @pytest.mark.parametrize("banco,esperado", [
     ("100_BANCO", {E.CONCILIADO: (13, 13), E.DIFERENCIA_MONTO: (6, 6), E.RESUMEN_SIN_MONTO: (0, 1),
                    E.OTRO_BANCO: (1, 0), E.SOLO_BANCO: (58, 0)}),
+    # Las comisiones ya no se usan como candidatas: la nómina de H. Marquina (429.466,06 = 350.000 + 79.466,06)
+    # se encuentra agrupada.
     ("BNC", {E.CONCILIADO: (288, 288), E.DIFERENCIA_MONTO: (6, 6), E.OTRO_BANCO: (4, 4),
-             E.SOLO_LIBRO: (0, 9), E.RESUMEN_SIN_MONTO: (0, 3), E.SOLO_BANCO: (496, 0)}),
+             E.CONCILIADO_AGRUPADO: (2, 1), E.SOLO_LIBRO: (0, 8), E.RESUMEN_SIN_MONTO: (0, 3),
+             E.SOLO_BANCO: (494, 0)}),
     ("BANPLUS", {E.CONCILIADO: (58, 58), E.DIFERENCIA_MONTO: (12, 12), E.OTRO_BANCO: (3, 4),
                  E.SOLO_LIBRO: (0, 5), E.RESUMEN_SIN_MONTO: (0, 2), E.SOLO_BANCO: (351, 0)}),
 ])

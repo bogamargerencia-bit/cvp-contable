@@ -5,6 +5,8 @@ Hojas:
                      archivo (ver revision.py). Dice si hay OK general.
   Resumen            Cuadre de cada banco, estado del libro y conciliación por estado.
   Naturaleza         Movimientos del banco por naturaleza (todos y los que no tienen asiento).
+  Comisiones e ISLR  Comisiones, cargos y retenciones ISLR POS sin asiento: total por banco y tipo, para
+                     compararlos a mano con el asiento del mes del sistema (columna amarilla).
   Cierre de caja     (si se dio el Excel de ventas) caja ↔ banco ↔ asientos resumen.
   Historial          Decisiones de corridas anteriores y su resultado.
   _control           (oculta) versión, cliente, período, corrida y códigos emitidos.
@@ -126,6 +128,7 @@ def excel_conciliacion(rep: ReporteCliente, salida: Path, revision=None) -> Path
 
     _hoja_resumen(resumen, rep, rangos)
     _hoja_naturaleza(hoja_nat, rep, rangos)
+    _hoja_comisiones(wb, rep, wb.sheetnames.index("Naturaleza") + 1)
     _hoja_revision(hoja_rev, rep, revision)
     _hoja_historial(wb.create_sheet("Historial"), rep, revision)
     _hoja_control(wb.create_sheet("_control"), rep, revision)
@@ -751,6 +754,72 @@ def _hoja_control(ws, rep: ReporteCliente, rv) -> None:
             i += 1
     ws.sheet_state = "hidden"
     ws.protection.sheet = True
+
+
+# ------------------------------------------------------------------ Comisiones e ISLR
+def _hoja_comisiones(wb, rep: ReporteCliente, posicion: int) -> None:
+    """Totales por banco, categoría y tipo (montos cobrados en positivo) y el detalle de movimientos."""
+    from .cargos import por_conciliar
+    cats = por_conciliar(rep)
+    if not cats:
+        return
+    ws = wb.create_sheet("Comisiones e ISLR", posicion)
+    ws["A1"] = f"{rep.cliente} — Comisiones, cargos y retenciones ISLR POS ({rep.periodo})"
+    ws["A1"].font = TIT
+    ws["A2"] = ("Lo que el banco cobró o retuvo y no tiene asiento en el libro, agrupado por banco y tipo. Compare cada "
+                "total con el asiento del mes del sistema y anote el monto registrado en la columna amarilla.")
+    ws["A2"].font = NOTA
+    editable = PatternFill("solid", start_color="FFF2CC")
+    totales: dict[str, list[int]] = {}           # categoría → filas de su total en cada banco
+    r = 4
+    for b in rep.bancos:
+        mias = [c for c in cats if c.banco == b]
+        if not mias:
+            continue
+        ws.cell(r, 1, NOMBRE.get(b, b)).font = SUB
+        r += 1
+        _enc(ws, r, ["Categoría", "Tipo", "Movimientos", "Total cobrado (Bs.)", "Registrado en el sistema (Bs.)",
+                     "Diferencia (Bs.)"], [44, 46, 13, 18, 22, 16])
+        for cat in mias:
+            r0 = r + 1
+            for i, t in enumerate(cat.tipos):
+                r += 1
+                _fila(ws, r, [cat.nombre if i == 0 else None, t.nombre, len(t.movimientos), -t.total],
+                      {4: NUM})
+            r += 1
+            totales.setdefault(cat.nombre, []).append(r)
+            _fila(ws, r, [f"Total {cat.nombre}", None, f"=SUM(C{r0}:C{r - 1})", f"=SUM(D{r0}:D{r - 1})", None,
+                          f'=IF(E{r}="","",ROUND(D{r}-E{r},2))'], {4: NUM, 5: NUM, 6: NUM}, fill=TOT, font=B)
+            c = ws.cell(r, 5)
+            c.fill = editable
+            c.number_format = NUM
+        r += 2
+    # Gran total de todos los bancos, por categoría.
+    ws.cell(r, 1, "Totales de todos los bancos").font = SUB
+    r += 1
+    _enc(ws, r, ["Categoría", "", "Movimientos", "Total cobrado (Bs.)", "Registrado en el sistema (Bs.)",
+                 "Diferencia (Bs.)"])
+    for cat_nombre, filas in totales.items():
+        r += 1
+        _fila(ws, r, [f"Gran total {cat_nombre}", None, "=" + "+".join(f"C{x}" for x in filas),
+                      "=" + "+".join(f"D{x}" for x in filas), "=" + "+".join(f"N(E{x})" for x in filas),
+                      f'=IF(AND({",".join(f"E{x}=\"\"" for x in filas)}),"",ROUND(D{r}-E{r},2))'],
+              {4: NUM, 5: NUM, 6: NUM}, fill=TOT, font=B)
+    r += 2
+    ws.cell(r, 1, "Detalle de movimientos").font = SUB
+    r += 1
+    _enc(ws, r, ["Banco", "Categoría", "Tipo", "Fecha", "Referencia", "Descripción", "Monto cobrado (Bs.)"])
+    for col, w in zip("ABCDEFG", [14, 44, 46, 13, 22, 44, 18]):
+        ws.column_dimensions[col].width = max(ws.column_dimensions[col].width or 0, w)
+    d0 = r + 1
+    for cat in cats:
+        for t in cat.tipos:
+            for m in sorted(t.movimientos, key=lambda m: m.fecha_contable):
+                r += 1
+                _fila(ws, r, [NOMBRE.get(cat.banco, cat.banco), cat.nombre, t.nombre, m.fecha_contable,
+                              m.referencia or None, m.descripcion, m.debito - m.credito], {4: FECHA, 7: NUM})
+    ws.auto_filter.ref = f"A{d0 - 1}:G{r}"
+    ws.freeze_panes = "A4"
 
 
 # ------------------------------------------------------------------ Divisas

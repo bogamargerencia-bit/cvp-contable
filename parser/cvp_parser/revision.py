@@ -32,8 +32,9 @@ from .conciliacion import EstadoPartida as EP
 from .conciliacion_caja import EstadoCaja
 from .cuadre import Estado
 from .diagnostico import (Explicacion, diagnosticar, explicar_caja_dia, explicar_diferencia_monto, explicar_divisa_fecha, explicar_venta_aparte, explicar_grupo,
-                          explicar_libro_sin_entradas, explicar_mov_suelto, explicar_otro_banco, explicar_pareja,
+                          explicar_libro_sin_entradas, explicar_por_conciliar, explicar_asiento_aparte, ASIENTO_APARTE, explicar_mov_suelto, explicar_otro_banco, explicar_pareja,
                           explicar_solo_libro, generico)
+from .cargos import CATEGORIAS as CATEGORIAS_APARTE, por_conciliar
 from .divisas import VENTA_APARTE
 from .naturaleza import E_TRANSF, E_TRASLADO, OTROS, S_IMPUESTOS, S_PAGO_MOVIL, S_TRANSF, S_TRASLADO
 from .proceso import ReporteCliente
@@ -180,11 +181,13 @@ def pendientes(rep: ReporteCliente) -> list[Pendiente]:
             for j in p.asientos:
                 a = rc.libro.asientos[j]
                 desc = a.descripcion if a.monto_bs is not None else f"{a.referencia} — {a.descripcion}"
+                aparte = ASIENTO_APARTE.search(f"{a.referencia} {a.descripcion}")
                 if p.estado is EP.SOLO_LIBRO:
                     pr = dg.parejas.get((b, j))
                     agregar(b, "Libro", "Solo en libro", a.fecha, desc, a.monto_bs, a.monto_usd, det,
                             "Corregido en el sistema / Justificado (en tránsito)",
-                            exp=explicar_pareja(rep, pr) if pr else explicar_solo_libro(rep, b, j, dg))
+                            exp=explicar_pareja(rep, pr) if pr else explicar_asiento_aparte(a) if aparte
+                            else explicar_solo_libro(rep, b, j, dg))
                 elif p.estado is EP.OTRO_BANCO:
                     agregar(b, "Libro", "Registrado en el libro de otro banco", a.fecha, desc, a.monto_bs,
                             a.monto_usd, det, "Corregido en el sistema", exp=explicar_otro_banco(p.nota or ""))
@@ -197,7 +200,7 @@ def pendientes(rep: ReporteCliente) -> list[Pendiente]:
                             "Corregido en el sistema")
                 elif p.estado is EP.RESUMEN_SIN_MONTO:
                     agregar(b, "Libro", "Asiento resumen sin conciliar", a.fecha, desc, None, a.monto_usd, det,
-                            "Justificado")
+                            "Justificado", exp=explicar_asiento_aparte(a) if aparte else None)
                 elif p.estado is EP.CONCILIADO_CAJA and "Faltan en el libro" in p.nota:
                     agregar(b, "Libro", "Asiento resumen incompleto", a.fecha, desc, None, a.monto_usd, p.nota,
                             "Corregido en el sistema")
@@ -300,6 +303,13 @@ def pendientes(rep: ReporteCliente) -> list[Pendiente]:
                 f"Libro {NOMBRE.get(b, b)} sin débitos", None, None, "", "Corregido en el sistema",
                 exp=explicar_libro_sin_entradas(rep, b))
 
+    # 5a. Comisiones, cargos y retenciones de ISLR POS: aparte, un total por banco y categoría
+    #     (el analista los compara con el asiento del mes del sistema; hoja «Comisiones e ISLR»).
+    for cat in por_conciliar(rep, sin_caja_idx | dg.movs_en_pareja):
+        agregar(cat.banco, "Grupo", f"Por conciliar en el sistema: {cat.nombre}", rep.conciliaciones[cat.banco].extracto.hasta,
+                f"{cat.nombre} — total del mes ({len(cat.movimientos)} mov.)", cat.total, None,
+                "Detalle en la hoja «Comisiones e ISLR».", "Aceptar", exp=explicar_por_conciliar(cat))
+
     # 5. Lo que queda solo en el banco: transferencias, pagos, traslados y no clasificados uno por uno
     #    (hay que identificar cada uno); comisiones, cargos, ISLR, nómina... agrupados por naturaleza.
     #    Los movimientos que el diagnóstico emparejó con un asiento ya se explican en la partida del asiento.
@@ -309,7 +319,8 @@ def pendientes(rep: ReporteCliente) -> list[Pendiente]:
         for x in rep.clasificados[b]:
             p = rc.estado_mov.get(x.indice)
             if (p and p.estado in (EP.SOLO_BANCO, EP.CAJA_SIN_LIBRO) and (b, x.indice) not in sin_caja_idx
-                    and (b, x.indice) not in dg.movs_en_pareja):
+                    and (b, x.indice) not in dg.movs_en_pareja
+                    and not (p.estado is EP.SOLO_BANCO and x.naturaleza in CATEGORIAS_APARTE)):
                 grupos[(p.estado.value, x.naturaleza)].append(x)
         for (estado, nat), xs in sorted(grupos.items()):
             if estado == EP.SOLO_BANCO.value and nat in INDIVIDUALES and len(xs) <= MAX_INDIVIDUALES:

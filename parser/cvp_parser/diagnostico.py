@@ -501,3 +501,31 @@ def explicar_venta_aparte(cuenta: str, k, ventas: Decimal, kardex_dia: Decimal) 
         f"(«{k.descripcion}»). Las dos diferencias se compensan exactamente.",
         "Nada que corregir en el libro. Si se quiere el Kardex ordenado, sumar esa fila a la de ventas del día.",
         "Aceptar")
+
+
+def explicar_por_conciliar(cat) -> Explicacion:
+    """Total del mes de comisiones / cargos / ISLR POS de un banco, para comparar con el asiento del sistema."""
+    n = len(cat.movimientos)
+    tipos = "; ".join(f"{t.nombre}: {len(t.movimientos)} mov., Bs. {bs(abs(t.total))}" for t in cat.tipos[:12])
+    if len(cat.tipos) > 12:
+        tipos += f"; y {len(cat.tipos) - 12} tipos más"
+    return Explicacion(
+        f"Total del mes en {nb(cat.banco)}: {n} movimientos por Bs. {bs(abs(cat.total))}. Por tipo: {tipos}. "
+        "Estos movimientos no se concilian uno por uno: se comparan en total con el asiento del mes del sistema. "
+        "El detalle está en la hoja «Comisiones e ISLR» del Excel.",
+        f"Comparar Bs. {bs(abs(cat.total))} con el asiento del mes en el sistema. Si coincide, «Aceptar». Si no, "
+        "corregir el asiento y luego «Aceptar», o «Justificado» explicando la diferencia. No usar «Corregido en el "
+        "sistema»: esta partida aparece en cada corrida porque se concilia a mano.",
+        "Aceptar")
+
+
+ASIENTO_APARTE = re.compile(r"COMISI|ISLR|RETENC|GASTOS? BANC|CARGOS? BANC", re.I)
+
+
+def explicar_asiento_aparte(a) -> Explicacion:
+    """Asiento de comisiones / cargos / ISLR del libro: no se concilia con movimientos del banco."""
+    return Explicacion(
+        f"Asiento de comisiones, cargos o retenciones del mes («{a.descripcion}», US$ {bs(a.monto_usd)}). Estos "
+        "conceptos no se concilian movimiento por movimiento: se comparan en total con la hoja «Comisiones e ISLR».",
+        "Comparar el asiento con el total del banco en esa hoja (y en la partida «Por conciliar en el sistema»). "
+        "Si coincide, «Aceptar»; si no, corregir el asiento.", "Aceptar")

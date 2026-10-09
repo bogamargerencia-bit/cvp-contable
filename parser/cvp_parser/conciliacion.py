@@ -26,7 +26,12 @@ from enum import Enum
 from typing import Optional
 
 from .modelo import Extracto, Movimiento
+from .naturaleza import S_CARGOS, S_COMISION, S_ISLR
 from .sistema import AsientoLibro, LibroBanco
+
+
+# Naturalezas que no se concilian contra el libro (se resumen aparte; ver cargos.py).
+NO_CONCILIAR = {S_COMISION, S_CARGOS, S_ISLR}
 
 
 class EstadoPartida(str, Enum):
@@ -103,6 +108,10 @@ def conciliar(extracto: Extracto, libro: LibroBanco, dias: int = 5,
     movs = extracto.movimientos
     asientos = libro.asientos
     libres_m = set(range(len(movs)))
+    # Comisiones, cargos y retenciones ISLR POS no se concilian contra el libro: se totalizan aparte
+    # (cargos.py) y el analista los compara con el asiento del mes del sistema.
+    aparte = {i for i in libres_m if (naturalezas or {}).get(i) in NO_CONCILIAR}
+    libres_m -= aparte
     libres_a = set(range(len(asientos)))
     partidas: list[Partida] = []
 
@@ -204,6 +213,7 @@ def conciliar(extracto: Extracto, libro: LibroBanco, dias: int = 5,
     # 3b. Total del mes: asientos de cierre («INGRESO POR PUNTO DE VENTAS AGOSTO», «COMISIONES
     #     BANCARIAS AGOSTO») iguales a la suma de una o dos naturalezas del banco en todo el período.
     pistas_total: dict[int, str] = {}
+    libres_m |= aparte          # comisiones / cargos / ISLR: solo pueden casar como total exacto del mes
     if naturalezas:
         for j in sorted(libres_a):
             a = asientos[j]
@@ -246,6 +256,9 @@ def conciliar(extracto: Extracto, libro: LibroBanco, dias: int = 5,
                 pistas_total[j] = (f"Posible total del mes de {' + '.join(opt)}: {len(idx)} movimientos por "
                                    f"Bs. {total} (diferencia {a.monto_bs - total}). Revisar; no se concilió.")
 
+    aparte &= libres_m          # los que no casaron como total del mes vuelven a quedar fuera
+    libres_m -= aparte
+
     # 4. Diferencia de monto (céntimos / redondeos).
     for j in sorted(con_monto, key=lambda j: asientos[j].fecha):
         if j not in libres_a:
@@ -274,7 +287,7 @@ def conciliar(extracto: Extracto, libro: LibroBanco, dias: int = 5,
     for j in sorted(libres_a):
         estado = EstadoPartida.RESUMEN_SIN_MONTO if asientos[j].es_resumen else EstadoPartida.SOLO_LIBRO
         partidas.append(Partida(estado, [], [j], nota=notas_resumen.get(j, "") or pistas_total.get(j, "")))
-    for i in sorted(libres_m):
+    for i in sorted(libres_m | aparte):
         partidas.append(Partida(EstadoPartida.SOLO_BANCO, [i], []))
 
     est_m = {i: p for p in partidas for i in p.movs}
@@ -314,6 +327,8 @@ def conciliar_cliente(pares: list[tuple[Extracto, LibroBanco]], dias: int = 5,
                     continue
                 for q in ry.partidas:
                     if q.estado is not EstadoPartida.SOLO_BANCO or (by, q.movs[0]) in usados:
+                        continue
+                    if (naturalezas or {}).get(by, {}).get(q.movs[0]) in NO_CONCILIAR:
                         continue
                     m = ry.extracto.movimientos[q.movs[0]]
                     if _monto(m) == a.monto_bs and _es_salida(m) == a.es_salida and _dias(m, a) <= dias:

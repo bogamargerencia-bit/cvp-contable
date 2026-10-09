@@ -145,3 +145,33 @@ def test_diagnostico_no_empareja_con_comisiones():
     assert not [p for p in rv.pendientes if "Comision" in p.explicacion and p.tipo == "Solo en libro"]
     [k] = [p for p in rv.pendientes if p.descripcion.startswith("KOZMOS")]
     assert "10.622,93" in k.explicacion and "-200,00" in k.explicacion
+
+
+
+def test_comisiones_e_islr_aparte(tmp_path):
+    """WEI/CACAO: comisiones, cargos e ISLR no se concilian movimiento a movimiento; van aparte, un total
+    por banco y categoría (con su desglose por tipo) y una hoja propia en el Excel."""
+    import openpyxl
+    import test_wei_rest as tw
+    from cvp_parser.cargos import por_conciliar
+    from cvp_parser.exportar import excel_conciliacion
+    from cvp_parser.naturaleza import S_COMISION, S_ISLR
+    from cvp_parser.proceso import procesar_cliente
+    from cvp_parser.revision import aplicar
+    rep = procesar_cliente("WEI REST", "2026-08", tw.ARCHIVOS)
+    cats = por_conciliar(rep)
+    bnc = next(c for c in cats if c.banco == "BNC" and c.nombre == S_COMISION)
+    # Total exacto = suma de todos los movimientos de comisiones de BNC (ninguno quedó conciliado).
+    todos = [x.mov for x in rep.clasificados["BNC"] if x.naturaleza == S_COMISION]
+    assert bnc.total == sum((m.credito - m.debito for m in todos), D("0")) and len(bnc.movimientos) == len(todos)
+    assert {t.nombre for t in bnc.tipos} >= {"Comisión Credito Inmediato", "Comisión Pago Movil"}
+    rv = aplicar(rep)
+    ps = [p for p in rv.pendientes if p.tipo.startswith("Por conciliar en el sistema")]
+    assert {(p.banco, p.tipo.split(": ", 1)[1]) for p in ps} >= {("BNC", S_COMISION), ("BNC", S_ISLR)}
+    assert not [p for p in rv.pendientes if p.tipo in (f"Solo en banco: {S_COMISION}", f"Solo en banco: {S_ISLR}")]
+    p = next(p for p in ps if p.banco == "BNC" and p.tipo.endswith(S_COMISION))
+    assert p.monto_bs == bnc.total and p.sugerencia == "Aceptar" and "Comisión Pago Movil" in p.explicacion
+    salida = excel_conciliacion(rep, tmp_path / "x.xlsx", rv)
+    ws = openpyxl.load_workbook(salida)["Comisiones e ISLR"]
+    textos = [c.value for row in ws.iter_rows() for c in row if isinstance(c.value, str)]
+    assert f"Total {S_COMISION}" in textos and f"Gran total {S_COMISION}" in textos and "Detalle de movimientos" in textos
