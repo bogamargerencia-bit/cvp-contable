@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Mensajes } from "@/components/mensajes";
 import { exigirAdmin } from "@/lib/sesion";
-import { CONFIGS_PARSER } from "@/lib/tipos";
+import { CONFIGS_PARSER, MODOS } from "@/lib/tipos";
 import { crearCliente } from "../actions";
 
 export default async function NuevoCliente({ searchParams }: PageProps<"/clientes/nuevo">) {
@@ -26,6 +26,12 @@ export default async function NuevoCliente({ searchParams }: PageProps<"/cliente
             <label htmlFor="rif" className="etiqueta">RIF</label>
             <input id="rif" name="rif" className="campo" placeholder="J-12345678-9" />
           </div>
+        </div>
+        <div>
+          <label htmlFor="modo" className="etiqueta">Servicio</label>
+          <select id="modo" name="modo" className="campo" defaultValue={"conciliacion"}>
+            {MODOS.map((m) => <option key={m.valor} value={m.valor}>{m.nombre} — {m.ayuda}</option>)}
+          </select>
         </div>
         <div>
           <label htmlFor="clave_config" className="etiqueta">Reglas del parser</label>

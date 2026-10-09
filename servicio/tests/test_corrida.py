@@ -315,3 +315,36 @@ def test_cuenta_inactiva_se_ignora(tmp_path):
     archivos = sb.select("archivos", periodo_id=f"eq.{p['id']}")
     with pytest.raises(ErrorCorrida, match="No hay ninguna cuenta bancaria"):
         armar_entrada(c, p, archivos, sb.descargar, tmp_path)
+
+
+@pytest.mark.skipif(not (WEI / "ventas.xlsx").exists(), reason="faltan los archivos reales de WEI")
+def test_solo_conversion():
+    """Cliente en modo conversión: solo estados de cuenta, sin libro; Excel con resumen por ítem."""
+    import io
+    import openpyxl
+    sb = FakeSB()
+    c, p = sb.cliente("CLIENTE CONVERSION", None)
+    c["config"] = {"modo": "conversion"}
+    for banco, edo in [("BNC", "edo_bnc.xls"), ("BANPLUS", "edo_banplus.xlsx"), ("100_BANCO", "edo_100_banco.pdf")]:
+        sb.archivo(p, WEI / edo, "estado_cuenta", sb.cuenta(c, f"{banco} principal", banco=banco))
+    sb.cuenta(c, "BNC sin archivo", banco="BNC")          # cuenta sin estado de cuenta: no impide procesar
+    r = sb.corrida(p, 1)
+    procesar_corrida(sb, r["id"])
+    assert r["estado"] == "lista", r.get("error")
+    res = r["resumen"]
+    assert res["modo"] == "conversion" and res["ok_general"] is True and len(res["cuentas"]) == 3
+    assert not sb.t["partidas"]
+    bnc = next(x for x in res["cuentas"] if x["banco"] == "BNC")
+    assert bnc["movimientos"] == 794 and bnc["debitos"] == "50363951.11" and bnc["creditos"] == "50379929.63"
+    wb = openpyxl.load_workbook(io.BytesIO(sb.storage[r["excel_path"]]))
+    assert wb.sheetnames[:2] == ["Resumen", "Resumen por ítem"]
+
+
+def test_solo_conversion_sin_estados():
+    sb = FakeSB()
+    c, p = sb.cliente("X", None)
+    c["config"] = {"modo": "conversion"}
+    sb.cuenta(c, "BNC", banco="BNC")
+    r = sb.corrida(p, 1)
+    procesar_corrida(sb, r["id"])
+    assert r["estado"] == "error" and "ningún estado de cuenta" in r["error"]

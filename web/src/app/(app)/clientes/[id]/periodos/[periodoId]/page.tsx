@@ -7,7 +7,8 @@ import { Refresco } from "@/components/refresco";
 import { Subida } from "@/components/subida";
 import { perfilActual } from "@/lib/sesion";
 import { crearClienteServidor } from "@/lib/supabase/server";
-import { MESES, MINUTOS_EN_COLA, ahoraMs, nombreBanco, type Cuenta } from "@/lib/tipos";
+import { formatoVE } from "@/lib/montos";
+import { MESES, MINUTOS_EN_COLA, ahoraMs, modoDe, nombreBanco, type Cuenta } from "@/lib/tipos";
 import { cambiarEstadoPeriodo, procesar } from "./actions";
 
 type Archivo = {
@@ -19,7 +20,13 @@ type Archivo = {
   subido_en: string;
   autor: { nombre: string | null; email: string } | null;
 };
+type CuentaConvertida = {
+  cuenta: string; banco: string; movimientos: number; saldo_anterior: string; debitos: string; creditos: string;
+  saldo_final: string; cuadre: string; cuadra: boolean; mensajes: string[];
+};
 type Resumen = {
+  modo?: "conversion";
+  cuentas?: CuentaConvertida[];
   ok_general: boolean;
   abiertas: number;
   resueltas: number;
@@ -64,7 +71,7 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
   const supabase = await crearClienteServidor();
 
   const [{ data: cliente }, { data: periodo }, { data: cuentasD }, { data: archivosD }, { data: corridasD }] = await Promise.all([
-    supabase.from("clientes").select("id, nombre, nombre_comercial").eq("id", id).maybeSingle(),
+    supabase.from("clientes").select("id, nombre, nombre_comercial, config").eq("id", id).maybeSingle(),
     supabase.from("periodos").select("*").eq("id", periodoId).eq("cliente_id", id).maybeSingle(),
     supabase.from("cuentas").select("*").eq("cliente_id", id).eq("activo", true).order("tipo").order("nombre"),
     supabase.from("archivos")
@@ -90,8 +97,10 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
   const ultimaLista = corridas.find((c) => c.estado === "lista");
   const bancos = cuentas.filter((c) => c.tipo === "banco");
   const divisas = cuentas.filter((c) => c.tipo === "divisa");
-  const bancosListos = bancos.filter((c) => archivo("estado_cuenta", c.id) && archivo("libro_sistema", c.id));
-  const bancosIncompletos = bancos.filter(
+  // «Solo conversión»: basta el estado de cuenta; no hay libro, caja ni divisas.
+  const conversion = modoDe(cliente) === "conversion";
+  const bancosListos = bancos.filter((c) => archivo("estado_cuenta", c.id) && (conversion || archivo("libro_sistema", c.id)));
+  const bancosIncompletos = conversion ? [] : bancos.filter(
     (c) => (archivo("estado_cuenta", c.id) || archivo("libro_sistema", c.id)) && !bancosListos.includes(c),
   );
   const puedeProcesar = !cerrado && !enCurso && bancosListos.length > 0 && bancosIncompletos.length === 0;
@@ -156,12 +165,12 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
                 {c.nombre} · {nombreBanco(c.banco)}
               </p>
               <div className="divide-y divide-linea/70">
-                {fila("Estado de cuenta", "estado_cuenta", c.id)}
-                {fila("Libro del sistema", "libro_sistema", c.id, "Mayor analítico o export del banco")}
+                {fila("Estado de cuenta", "estado_cuenta", c.id, conversion ? "PDF o Excel del banco" : undefined)}
+                {!conversion && fila("Libro del sistema", "libro_sistema", c.id, "Mayor analítico o export del banco")}
               </div>
             </div>
           ))}
-          {divisas.length > 0 && (
+          {!conversion && divisas.length > 0 && (
             <div className="tarjeta px-4 py-2">
               <p className="pt-1 text-xs font-medium uppercase tracking-wide text-tenue">Cuentas en divisas (libro en US$)</p>
               <div className="divide-y divide-linea/70">
@@ -169,6 +178,12 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
               </div>
             </div>
           )}
+          {conversion ? (
+            <p className="text-xs text-tenue">
+              Cliente de <span className="font-medium">solo conversión</span>: se convierten los estados de cuenta a Excel
+              con un resumen por ítem, sin libro ni conciliación.
+            </p>
+          ) : (
           <div className="tarjeta px-4 py-2">
             <p className="pt-1 text-xs font-medium uppercase tracking-wide text-tenue">Del período (opcionales)</p>
             <div className="divide-y divide-linea/70">
@@ -177,6 +192,7 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
               {fila("Excel de revisión con decisiones", "revision", null, "El Excel de la corrida anterior, corregido por el analista")}
             </div>
           </div>
+          )}
         </section>
 
         {/* ------------------------------------------------ procesar y corridas */}
@@ -191,7 +207,7 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
                   <li key={c.id} className={listo ? "" : parcial ? "text-alerta" : "text-tenue"}>
                     {listo ? "✓" : parcial ? "✗" : "–"} {c.nombre}
                     {parcial && " — falta " + (archivo("estado_cuenta", c.id) ? "el libro del sistema" : "el estado de cuenta")}
-                    {!listo && !parcial && " — sin archivos (no se procesa)"}
+                    {!listo && !parcial && (conversion ? " — sin estado de cuenta (no se procesa)" : " — sin archivos (no se procesa)")}
                   </li>
                 );
               })}
@@ -203,12 +219,13 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
               <span className="text-xs text-tenue">
                 {cerrado ? "Período cerrado." : enCurso ? "Hay una corrida en proceso…"
                   : bancosIncompletos.length ? "Completa o quita los archivos marcados con ✗."
-                  : bancosListos.length === 0 ? "Sube al menos un estado de cuenta con su libro." : "Usa los archivos vigentes de la izquierda."}
+                  : bancosListos.length === 0 ? (conversion ? "Sube al menos un estado de cuenta." : "Sube al menos un estado de cuenta con su libro.")
+                  : "Usa los archivos vigentes de la izquierda."}
               </span>
             </form>
           </div>
 
-          {ultimaLista && (
+          {ultimaLista && !conversion && (
             <div className="tarjeta flex flex-wrap items-center justify-between gap-3 p-4">
               <div className="text-sm">
                 <p className="font-medium">Revisión de la corrida {ultimaLista.numero}</p>
@@ -270,7 +287,8 @@ function TarjetaCorrida({ c, atascada }: { c: Corrida; atascada: boolean }) {
           Lleva más de {MINUTOS_EN_COLA} minutos en cola: el servicio no la tomó. Pulsa «Procesar» para intentarlo de nuevo.
         </p>
       )}
-      {r && (
+      {r?.modo === "conversion" && <ResumenConversion r={r} />}
+      {r && r.modo !== "conversion" && (
         <div className="mt-3 space-y-3 text-sm">
           <table className="tabla">
             <thead>
@@ -318,6 +336,47 @@ function TarjetaCorrida({ c, atascada }: { c: Corrida; atascada: boolean }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Resultado de una corrida de «Solo conversión»: cuadre de cada estado de cuenta (montos como texto exacto). */
+function ResumenConversion({ r }: { r: Resumen }) {
+  const cuentas = r.cuentas ?? [];
+  return (
+    <div className="mt-3 space-y-3 text-sm">
+      <div className="overflow-x-auto">
+        <table className="tabla">
+          <thead>
+            <tr><th>Cuenta</th><th className="text-right">Mov.</th><th className="text-right">Débitos (Bs.)</th>
+              <th className="text-right">Créditos (Bs.)</th><th className="text-right">Saldo final (Bs.)</th><th>Cuadre</th></tr>
+          </thead>
+          <tbody>
+            {cuentas.map((c) => (
+              <tr key={c.cuenta}>
+                <td>{c.cuenta}<span className="block text-xs text-tenue">{nombreBanco(c.banco)}</span></td>
+                <td className="text-right">{c.movimientos}</td>
+                <td className="text-right whitespace-nowrap">{formatoVE(c.debitos)}</td>
+                <td className="text-right whitespace-nowrap">{formatoVE(c.creditos)}</td>
+                <td className="text-right whitespace-nowrap">{formatoVE(c.saldo_final)}</td>
+                <td className={c.cuadra ? "text-acento" : "font-medium text-alerta"}>
+                  {c.cuadre === "cuadra" ? "Cuadra" : c.cuadre === "requiere_revision" ? "Cuadra (revisar avisos)" : "NO CUADRA"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {cuentas.some((c) => c.mensajes.length > 0) || r.advertencias.length > 0 ? (
+        <details>
+          <summary className="cursor-pointer text-sm font-medium">Diferencias y avisos</summary>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+            {r.advertencias.map((a, i) => <li key={`a${i}`}>{a}</li>)}
+            {cuentas.flatMap((c) => c.mensajes.map((m, i) => <li key={`${c.cuenta}${i}`}>{c.cuenta}: {m}</li>))}
+          </ul>
+        </details>
+      ) : null}
+      <p className="text-xs text-tenue">El Excel trae una hoja por cuenta y el «Resumen por ítem» (naturaleza y concepto).</p>
     </div>
   );
 }

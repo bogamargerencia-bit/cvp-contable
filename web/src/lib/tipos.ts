@@ -18,9 +18,19 @@ export interface Cliente {
   nombre_comercial: string | null;
   rif: string | null;
   clave_config: string | null;
+  config: { modo?: Modo } | null;
   activo: boolean;
   creado_en: string;
 }
+
+/** Tipo de servicio: conciliación completa, o solo conversión de estados de cuenta a Excel. */
+export type Modo = "conciliacion" | "conversion";
+export const MODOS: { valor: Modo; nombre: string; ayuda: string }[] = [
+  { valor: "conciliacion", nombre: "Conciliación", ayuda: "Estados de cuenta + libro del sistema, caja y divisas." },
+  { valor: "conversion", nombre: "Solo conversión a Excel", ayuda: "Solo estados de cuenta: Excel con resumen por ítem." },
+];
+export const modoDe = (c: { config?: { modo?: string } | null }): Modo =>
+  c.config?.modo === "conversion" ? "conversion" : "conciliacion";
 
 export interface Cuenta {
   id: string;

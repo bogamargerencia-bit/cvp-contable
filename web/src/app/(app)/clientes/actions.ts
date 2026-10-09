@@ -4,12 +4,14 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { exigirAdmin, perfilActual } from "@/lib/sesion";
 import { crearClienteServidor } from "@/lib/supabase/server";
-import { BANCOS, CONFIGS_PARSER } from "@/lib/tipos";
+import { BANCOS, CONFIGS_PARSER, type Modo } from "@/lib/tipos";
 
 const txt = (f: FormData, k: string) => {
   const v = String(f.get(k) ?? "").trim();
   return v === "" ? null : v;
 };
+const modoForm = (f: FormData): Modo => (f.get("modo") === "conversion" ? "conversion" : "conciliacion");
+
 function err(ruta: string, m: string): never {
   redirect(`${ruta}?error=${encodeURIComponent(m)}`);
 }
@@ -34,7 +36,8 @@ export async function crearCliente(f: FormData) {
   const supabase = await crearClienteServidor();
   const { data, error } = await supabase
     .from("clientes")
-    .insert({ nombre, nombre_comercial: txt(f, "nombre_comercial"), rif, clave_config: clave, creado_por: perfil.id })
+    .insert({ nombre, nombre_comercial: txt(f, "nombre_comercial"), rif, clave_config: clave,
+      config: { modo: modoForm(f) }, creado_por: perfil.id })
     .select("id")
     .single();
   if (error) err("/clientes/nuevo", error.code === "23505" ? "Ya existe un cliente con ese RIF" : "No se pudo crear el cliente");
@@ -154,8 +157,10 @@ export async function editarCliente(f: FormData) {
   if (clave && !CONFIGS_PARSER.includes(clave)) err(ruta, "Configuración del parser desconocida");
 
   const supabase = await crearClienteServidor();
+  const { data: actual } = await supabase.from("clientes").select("config").eq("id", id).maybeSingle();
+  const config = { ...((actual?.config as Record<string, unknown> | null) ?? {}), modo: modoForm(f) };
   const { error } = await supabase.from("clientes")
-    .update({ nombre, nombre_comercial: txt(f, "nombre_comercial"), rif, clave_config: clave }).eq("id", id);
+    .update({ nombre, nombre_comercial: txt(f, "nombre_comercial"), rif, clave_config: clave, config }).eq("id", id);
   if (error) err(ruta, error.code === "23505" ? "Ya existe un cliente con ese RIF" : "No se pudo guardar el cliente");
   revalidatePath(ruta);
   revalidatePath("/");

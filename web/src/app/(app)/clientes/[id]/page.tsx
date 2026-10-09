@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Mensajes } from "@/components/mensajes";
 import { perfilActual } from "@/lib/sesion";
 import { crearClienteServidor } from "@/lib/supabase/server";
-import { BANCOS, CONFIGS_PARSER, DIVISAS_PARSER, MESES, nombreBanco, type Cliente, type Cuenta, type Periodo } from "@/lib/tipos";
+import { BANCOS, CONFIGS_PARSER, DIVISAS_PARSER, MODOS, modoDe, MESES, nombreBanco, type Cliente, type Cuenta, type Periodo } from "@/lib/tipos";
 import { cambiarEstadoCliente, crearCuenta, crearPeriodo, editarCliente, editarCuenta, eliminarCuenta } from "../actions";
 
 /** Muestra solo los últimos 4 dígitos: son datos bancarios de terceros. */
@@ -40,6 +40,7 @@ export default async function DetalleCliente({ params, searchParams }: PageProps
           <h1 className="titulo">{c.nombre_comercial ?? c.nombre}</h1>
           <p className="mt-1 text-sm text-tenue">
             {c.nombre}{c.rif && ` · ${c.rif}`}{c.clave_config && ` · reglas ${c.clave_config}`}
+            {modoDe(c) === "conversion" && <span className="insignia ml-2 bg-acento-suave text-acento">solo conversión</span>}
             {!c.activo && " · inactivo"}
           </p>
         </div>
@@ -69,6 +70,12 @@ export default async function DetalleCliente({ params, searchParams }: PageProps
             <div>
               <label htmlFor="c_rif" className="etiqueta">RIF</label>
               <input id="c_rif" name="rif" defaultValue={c.rif ?? ""} className="campo" placeholder="J-12345678-9" />
+            </div>
+            <div className="sm:col-span-2">
+              <label htmlFor="c_modo" className="etiqueta">Servicio</label>
+              <select id="c_modo" name="modo" className="campo" defaultValue={modoDe(c)}>
+                {MODOS.map((m) => <option key={m.valor} value={m.valor}>{m.nombre} — {m.ayuda}</option>)}
+              </select>
             </div>
             <div>
               <label htmlFor="c_clave" className="etiqueta">Reglas del parser</label>

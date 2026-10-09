@@ -220,6 +220,101 @@ def nombre_excel(e: Entrada, numero: int) -> str:
     return f"{_seguro(e.cliente)}_{e.periodo}_corrida{numero:02d}.xlsx"
 
 
+# ---------------------------------------------------------------- servicio «Solo conversión»
+def es_conversion(cliente: dict) -> bool:
+    return (cliente.get("config") or {}).get("modo") == "conversion"
+
+
+def armar_conversion(cliente: dict, periodo: dict, archivos: list[dict], descargar, carpeta: Path,
+                     avisar=None) -> tuple[str, str, list[tuple[str, str, Path]], list[str], list[str]]:
+    """Solo estados de cuenta de cuentas bancarias activas. Devuelve (cliente, período, [(cuenta, banco, ruta)],
+    archivos usados, avisos)."""
+    clave = cliente.get("clave_config") or cliente.get("nombre_comercial") or cliente["nombre"]
+    per = f"{periodo['anio']}-{periodo['mes']:02d}"
+    ultimos: dict[str, dict] = {}
+    avisos: list[str] = []
+    for a in sorted(archivos, key=lambda a: a["subido_en"]):
+        c = a.get("cuenta")
+        if a["tipo"] != "estado_cuenta" or not c or c.get("tipo") != "banco":
+            continue
+        if c.get("activo") is False:
+            avisos.append(f"Se ignoró el estado de cuenta de la cuenta inactiva «{c['nombre']}».")
+            continue
+        if a["cuenta_id"] in ultimos:
+            avisos.append(f"Hay más de un estado de cuenta vigente para «{c['nombre']}»; se usó el más reciente "
+                          f"({a['nombre_original']}).")
+        ultimos[a["cuenta_id"]] = a
+    if not ultimos:
+        raise ErrorCorrida("No hay ningún estado de cuenta subido en las cuentas bancarias de este período.")
+    entrada: list[tuple[str, str, Path]] = []
+    usados: list[str] = []
+    lista = sorted(ultimos.values(), key=lambda a: a["cuenta"]["nombre"])
+    for n, a in enumerate(lista, 1):
+        c = a["cuenta"]
+        if c["banco"] not in LECTORES:
+            raise ErrorCorrida(f"La cuenta «{c['nombre']}» es de {c['banco']}, que todavía no tiene lector "
+                               f"(disponibles: {', '.join(LECTORES)}).")
+        if avisar:
+            avisar(n, len(lista), a["nombre_original"])
+        datos = descargar(a["storage_path"])
+        if hashlib.sha256(datos).hexdigest() != a["sha256"]:
+            raise ErrorCorrida(f"El archivo «{a['nombre_original']}» no coincide con el que se subió "
+                               "(huella SHA-256 distinta). Vuelve a subirlo.")
+        ruta = carpeta / f"{a['id']}-{_seguro(a['nombre_original'])}"
+        ruta.write_bytes(datos)
+        entrada.append((c["nombre"], c["banco"], ruta))
+        usados.append(a["id"])
+    return clave, per, entrada, usados, avisos
+
+
+def resumen_conversion(conv, avisos: list[str]) -> dict[str, Any]:
+    cuentas = []
+    for c in conv.cuentas:
+        e, q = c.extracto, c.cuadre
+        cuentas.append({
+            "cuenta": c.nombre, "banco": c.banco, "movimientos": len(e.movimientos),
+            "saldo_anterior": _txt(e.saldo_anterior), "debitos": _txt(q.total_debitos),
+            "creditos": _txt(q.total_creditos), "saldo_final": _txt(q.nuevo_saldo_calculado),
+            "cuadre": q.estado.value, "cuadra": q.estado is not Estado.NO_CUADRA,
+            "mensajes": [d.mensaje for d in q.diferencias] + [a.mensaje for a in q.avisos]
+                        + list(e.errores_lectura) + list(e.avisos_lectura),
+        })
+    return {
+        "modo": "conversion", "cliente": conv.cliente, "periodo": conv.periodo, "ok_general": conv.todo_cuadra,
+        "cuentas": cuentas,
+        # Campos que la web espera en toda corrida (vacíos en conversión).
+        "bancos": [], "bancos_no_cuadran": [c["cuenta"] for c in cuentas if not c["cuadra"]], "situaciones": {},
+        "abiertas": 0, "resueltas": 0, "alertas": [], "advertencias": avisos, "divisas": [],
+        "uso": {"bancos": [c["banco"] for c in cuentas], "divisas": [], "cierre_caja": False, "kardex": False,
+                "revision": False},
+    }
+
+
+def _procesar_conversion(sb, corrida: dict, cliente: dict, periodo: dict, archivos: list[dict], paso, filtro) -> None:
+    from cvp_parser.conversion import convertir, excel_conversion
+    with tempfile.TemporaryDirectory() as tmp:
+        carpeta = Path(tmp)
+        clave, per, entrada, usados, avisos = armar_conversion(
+            cliente, periodo, archivos, sb.descargar, carpeta,
+            avisar=lambda i, n, nom: paso(f"Descargando estados de cuenta ({i} de {n}): {nom}", 5 + 35 * i // n))
+        paso(f"Leyendo y cuadrando {len(entrada)} estado(s) de cuenta", 45)
+        try:
+            conv = convertir(clave, per, entrada)
+        except (ValueError, KeyError) as ex:
+            raise ErrorCorrida(f"No se pudo leer un estado de cuenta: {ex}") from ex
+        paso("Generando el Excel", 80)
+        salida = carpeta / f"{_seguro(clave)}_{per}_estados{corrida['numero']:02d}.xlsx"
+        excel_conversion(conv, salida)
+        ruta = f"{cliente['id']}/{periodo['id']}/corridas/{salida.name}"
+        paso("Guardando el Excel", 90)
+        sb.subir(ruta, salida.read_bytes(), XLSX)
+    sb.update("corridas", filtro, {
+        "estado": "lista", "etapa": "Terminada", "avance": 100, "ok_general": conv.todo_cuadra,
+        "resumen": resumen_conversion(conv, avisos), "excel_path": ruta, "archivos": usados, "error": None,
+        "terminada_en": dt.datetime.now(dt.timezone.utc).isoformat(),
+    })
+
+
 # ---------------------------------------------------------------- orquestación con Supabase
 def procesar_corrida(sb, corrida_id: str) -> bool:
     """Ejecuta la corrida y deja el resultado (o el error) en la tabla corridas.
@@ -245,6 +340,9 @@ def procesar_corrida(sb, corrida_id: str) -> bool:
         cliente = sb.uno("clientes", id=f"eq.{periodo['cliente_id']}", select="*")
         archivos = sb.select("archivos", periodo_id=f"eq.{periodo['id']}", vigente="is.true",
                              select="*,cuenta:cuentas(*)")
+        if es_conversion(cliente):
+            _procesar_conversion(sb, corrida, cliente, periodo, archivos, paso, filtro)
+            return True
         with tempfile.TemporaryDirectory() as tmp:
             carpeta = Path(tmp)
             e = armar_entrada(cliente, periodo, archivos, sb.descargar, carpeta,
