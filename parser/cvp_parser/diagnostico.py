@@ -529,3 +529,47 @@ def explicar_asiento_aparte(a) -> Explicacion:
         "conceptos no se concilian movimiento por movimiento: se comparan en total con la hoja «Comisiones e ISLR».",
         "Comparar el asiento con el total del banco en esa hoja (y en la partida «Por conciliar en el sistema»). "
         "Si coincide, «Aceptar»; si no, corregir el asiento.", "Aceptar")
+
+
+VENTAS_MEDIO = [
+    (re.compile(r"PAGO\s*M[OÓ]VIL|P2C", re.I), "pago móvil", {"Cobros por pago móvil / P2C"}),
+    (re.compile(r"PUNTO|\bPOS\b|D[EÉ]BITO|CR[EÉ]DITO", re.I), "tarjetas (POS)",
+     {"Cobros POS – tarjeta de débito", "Cobros POS – tarjeta de crédito"}),
+]
+ES_VENTAS = re.compile(r"\bVTAS\b|\bVENTAS?\b|INGRESO", re.I)
+
+
+def explicar_total_ventas(rep: "ReporteCliente", banco: str, j: int) -> Optional[Explicacion]:
+    """Asiento de ventas del mes con el total en Bs. que no casó con el total de cobros del banco."""
+    rc = rep.conciliaciones[banco]
+    a = rc.libro.asientos[j]
+    texto_a = f"{a.referencia} {a.descripcion}"
+    if a.monto_bs is None or a.es_salida or not ES_VENTAS.search(texto_a):
+        return None
+    medio = next(((n, nats) for rx, n, nats in VENTAS_MEDIO if rx.search(texto_a)), None)
+    if medio is None:
+        return None
+    nombre, nats = medio
+    cobros = [x for x in rep.clasificados[banco] if x.naturaleza in nats and x.mov.credito]
+    total = sum((x.mov.credito for x in cobros), CERO)
+    otros = [x for x in cobros if (p := rc.estado_mov.get(x.indice)) and p.estado in CONCILIADOS
+             and p.estado is not EP.CONCILIADO_TOTAL and any(k != j for k in p.asientos)]
+    otros_t = sum((x.mov.credito for x in otros), CERO)
+    libres_t = total - otros_t
+    texto = (f"El libro registra «{a.descripcion}» por Bs. {bs(a.monto_bs)}. En el banco, los cobros por {nombre} del "
+             f"mes suman Bs. {bs(total)} ({len(cobros)} movimientos)")
+    if otros:
+        det = "; ".join(f"{x.mov.fecha_contable:%d/%m} ref {x.mov.referencia or '—'} Bs. {bs(x.mov.credito)}"
+                        for x in otros[:5])
+        texto += (f"; de ellos, {len(otros)} ya están conciliados con otro asiento del libro ({det}), así que para "
+                  f"este asiento quedan Bs. {bs(libres_t)}")
+    texto += f". Diferencia del asiento: Bs. {bs(a.monto_bs - libres_t)}."
+    if otros and a.monto_bs == total:
+        texto += (" El asiento usa el total completo del banco: incluye cobros que ya tienen su propio asiento "
+                  "(quedarían registrados dos veces).")
+        hacer = (f"Si esos cobros sí tienen su propio asiento, poner Bs. {bs(libres_t)} en la Referencia. Si no "
+                 "corresponden a ese otro asiento, corregir ese asiento.")
+    else:
+        hacer = (f"Revisar el monto en la Referencia: para conciliar debe ser Bs. {bs(libres_t)} (suma exacta de los "
+                 f"cobros por {nombre} del banco sin asiento propio). Si la diferencia es real, justificarla.")
+    return Explicacion(texto, hacer, "Corregido en el sistema")

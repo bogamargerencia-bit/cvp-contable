@@ -173,7 +173,9 @@ def conciliar_caja(cierre: CierreCaja, clasificados: dict[str, list[MovClasifica
 
     def libre(b: str, x: MovClasificado) -> bool:
         p = conciliaciones[b].estado_mov.get(x.indice)
-        return (b, x.indice) not in usados and p is not None and p.estado is EP.SOLO_BANCO
+        # Un movimiento conciliado con el libro por «total del mes» (p. ej. VTAS … PAGO MOVIL con el total en
+        # Bs.) sigue disponible para el cruce día a día con la caja: son dos controles distintos.
+        return (b, x.indice) not in usados and p is not None and p.estado in (EP.SOLO_BANCO, EP.CONCILIADO_TOTAL)
 
     hasta_banco = {b: r.extracto.hasta for b, r in conciliaciones.items()}
     desde_banco = {b: r.extracto.desde or r.extracto.hasta.replace(day=1) for b, r in conciliaciones.items()}

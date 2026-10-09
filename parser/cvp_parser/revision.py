@@ -32,7 +32,7 @@ from .conciliacion import EstadoPartida as EP
 from .conciliacion_caja import EstadoCaja
 from .cuadre import Estado
 from .diagnostico import (Explicacion, diagnosticar, explicar_caja_dia, explicar_diferencia_monto, explicar_divisa_fecha, explicar_venta_aparte, explicar_grupo,
-                          explicar_libro_sin_entradas, explicar_por_conciliar, explicar_asiento_aparte, ASIENTO_APARTE, explicar_mov_suelto, explicar_otro_banco, explicar_pareja,
+                          explicar_libro_sin_entradas, explicar_por_conciliar, explicar_asiento_aparte, ASIENTO_APARTE, explicar_total_ventas, explicar_mov_suelto, explicar_otro_banco, explicar_pareja,
                           explicar_solo_libro, generico)
 from .cargos import CATEGORIAS as CATEGORIAS_APARTE, por_conciliar
 from .divisas import VENTA_APARTE
@@ -187,7 +187,7 @@ def pendientes(rep: ReporteCliente) -> list[Pendiente]:
                     agregar(b, "Libro", "Solo en libro", a.fecha, desc, a.monto_bs, a.monto_usd, det,
                             "Corregido en el sistema / Justificado (en tránsito)",
                             exp=explicar_pareja(rep, pr) if pr else explicar_asiento_aparte(a) if aparte
-                            else explicar_solo_libro(rep, b, j, dg))
+                            else explicar_total_ventas(rep, b, j) or explicar_solo_libro(rep, b, j, dg))
                 elif p.estado is EP.OTRO_BANCO:
                     agregar(b, "Libro", "Registrado en el libro de otro banco", a.fecha, desc, a.monto_bs,
                             a.monto_usd, det, "Corregido en el sistema", exp=explicar_otro_banco(p.nota or ""))
