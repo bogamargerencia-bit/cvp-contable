@@ -21,6 +21,7 @@ from .modelo import Extracto, Movimiento
 # --- Naturalezas (el orden es el del reporte) --------------------------------
 E_POS_DEB = "Cobros POS – tarjeta de débito"
 E_POS_CRE = "Cobros POS – tarjeta de crédito"
+E_POS_LIQ = "Cobros POS – liquidación de ventas"      # el banco abona débito y crédito juntos (Mercantil)
 E_PAGO_MOVIL = "Cobros por pago móvil / P2C"
 E_TRANSF = "Transferencias recibidas"
 E_TRASLADO = "Traslados desde cuentas propias"
@@ -37,10 +38,10 @@ S_CARGOS = "Cargos bancarios (mantenimiento, estado de cuenta, SMS)"
 S_REVERSO = "Reversos y rechazos (débitos)"
 OTROS = "Otros (sin clasificar)"
 
-ORDEN = [E_POS_DEB, E_POS_CRE, E_PAGO_MOVIL, E_TRANSF, E_TRASLADO, E_REVERSO,
+ORDEN = [E_POS_DEB, E_POS_CRE, E_POS_LIQ, E_PAGO_MOVIL, E_TRANSF, E_TRASLADO, E_REVERSO,
          S_NOMINA, S_TRANSF, S_PAGO_MOVIL, S_POS, S_TRASLADO, S_COMISION, S_ISLR, S_IMPUESTOS,
          S_CARGOS, S_REVERSO, OTROS]
-ENTRADAS = {E_POS_DEB, E_POS_CRE, E_PAGO_MOVIL, E_TRANSF, E_TRASLADO, E_REVERSO}
+ENTRADAS = {E_POS_DEB, E_POS_CRE, E_POS_LIQ, E_PAGO_MOVIL, E_TRANSF, E_TRASLADO, E_REVERSO}
 
 C, D = "C", "D"  # crédito (entrada) / débito (salida)
 
@@ -112,12 +113,18 @@ REGLAS: dict[str, list[tuple[str, str, str]]] = {
         (r"TRF CR INM|TRANS,?CTAS|TRANSF", D, S_TRANSF),
     ],
     "MERCANTIL": [
+        (r"^CANCELACION RESUMEN DE VENTAS", C, E_POS_LIQ),
+        (r"^REINTEGRO COMISION|^DEVOLUCION CREDITO INMEDIATO", C, E_REVERSO),
+        (r"^RECEPCION DE PAGO|^PAGO MOVIL", C, E_PAGO_MOVIL),   # solo la descripción del banco
         (r"CREDITO INMEDIATO|TRANSFERENCIA RECIBIDA", C, E_TRANSF),
+        (r"^DESCUENTO TARJETA", D, S_COMISION),             # descuento del banco sobre las ventas con tarjeta
         (r"^COMISION", D, S_COMISION),                       # antes que nómina: «COMISION POR … PAGO NOMINA»
         (r"EMISION EDO\. DE CTA|TARIFA MANTENIMIENTO", D, S_CARGOS),
         (r"PAGO AL SENIAT|IMPUESTO IGTF", D, S_IMPUESTOS),
         (r"PAGO DE NOMINA", D, S_NOMINA),
-        (r"CREDITO INMEDIATO - TRANSF\. PRES|TRANSFERENCIA DESDE LA CUENTA|ALTO VALOR PRESENTADA", D, S_TRANSF),
+        (r"^PAGO MOVIL|^TPAGO A UN MOVIL", D, S_PAGO_MOVIL),
+        (r"^CONSUMO TARJETA DE DEBITO", D, S_POS),
+        (r"CREDITO INMEDIATO|TRANSFERENCIA DESDE LA CUENTA|ALTO VALOR PRESENTADA", D, S_TRANSF),
     ],
     "BANCAMIGA": [
         (r"Liquidaci[oó]n a Comercio TDD", C, E_POS_DEB),

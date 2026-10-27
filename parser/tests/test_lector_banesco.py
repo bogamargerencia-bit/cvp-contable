@@ -49,4 +49,4 @@ def test_comisiones_punto_de_venta_en_cualquier_banco(desc):
     from cvp_parser.naturaleza import S_COMISION, clasificar
     m = Movimiento(dt.date(2026, 8, 31), desc, debito=D("794.99"))
     assert all(clasificar(b, m) == S_COMISION for b in ("BANESCO", "BNC", "OTRO_BANCO"))
-    assert tipo_de(m) in ("S.MAST", "S.DISG", "BCV.C.O.TPV.08/26")
+    assert tipo_de(m) in ("S.MAST", "S.DISG", "BCV.C.O.TPV")

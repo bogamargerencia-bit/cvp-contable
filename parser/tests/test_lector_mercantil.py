@@ -55,3 +55,34 @@ def test_clasificacion_y_conversion(extracto):
     its = items(conv.cuentas[0].movs)
     com = sum(i.debitos for i in its if i.naturaleza == "Comisiones bancarias")
     assert com == sum(m.debito for m in extracto.movimientos if m.descripcion.startswith("COMISION"))
+
+
+PDF_PERSONAL = Path(__file__).parent / "fixtures" / "mercantil_personal_2026_09" / "edo_mercantil.pdf"
+
+
+@pytest.mark.skipif(not PDF_PERSONAL.exists(), reason="falta el estado de la cuenta personal de Mercantil")
+def test_variante_movimientos_de_cuenta():
+    """Cuenta personal (69 páginas): CARGOS | ABONOS | SALDO por mitad de página; en la página 1 el banco
+    omite «POR» en «377 OTROS CREDITOS A SU CUENTA 45.305.570,80»."""
+    [e] = LECTORES["MERCANTIL"].leer([PDF_PERSONAL]).extractos
+    assert (e.cuenta, e.titular, e.saldo_anterior) == ("0105-0121-14-1121252354", "TABARES LEON ROSA MARIA",
+                                                       D("91209.83"))
+    assert not e.errores_lectura
+    q = cuadrar_extracto(e)
+    assert q.estado is Estado.CUADRA, [d.mensaje for d in q.diferencias[:5]]
+    assert (q.total_debitos, q.total_creditos, q.nuevo_saldo_calculado) == (
+        D("44922588.74"), D("45305570.80"), D("474191.89"))
+    assert sum(1 for m in e.movimientos if m.debito) == 739 and sum(1 for m in e.movimientos if m.credito) == 377
+    assert sum(1 for m in e.movimientos if m.saldo is not None) >= 16
+
+
+@pytest.mark.skipif(not PDF_PERSONAL.exists(), reason="falta el estado de la cuenta personal de Mercantil")
+def test_variante_personal_conceptos():
+    """El concepto no se parte por la fecha incrustada; «pago movil» escrito por el usuario en el detalle de
+    una transferencia no la vuelve pago móvil."""
+    conv = convertir("ROSA", "2026-09", [("Mercantil 2354", "MERCANTIL", PDF_PERSONAL)])
+    its = {(i.naturaleza, i.concepto): i for i in items(conv.cuentas[0].movs)}
+    assert its[("Cobros por pago móvil / P2C", "RECEPCION DE PAGO MOVIL")].n == 92
+    assert its[("Pagos por transferencia / crédito inmediato", "OPERACION DE CREDITO INMEDIATO - TRANSF. PRES")].n == 232
+    assert its[("Cobros POS – liquidación de ventas", "CANCELACION RESUMEN DE VENTAS Y RETENCIONES")].creditos == D("32709589.57")
+    assert its[("Comisiones bancarias", "DESCUENTO TARJETA")].n == 52

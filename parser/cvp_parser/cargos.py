@@ -26,8 +26,11 @@ assert set(CATEGORIAS) == NO_CONCILIAR
 
 
 def tipo_de(m: Movimiento) -> str:
-    """Tipo dentro de la categoría: la descripción del banco sin números de referencia (4+ dígitos)."""
-    t = re.sub(r"\b\d{4,}\b", " ", m.descripcion or "")
+    """Tipo (concepto) del movimiento: la descripción del banco sin lo que cambia de una operación a otra:
+    fecha y hora incrustadas («… EL 21/09/2026 A LAS …», «.08/26») y números de referencia (4+ dígitos)."""
+    t = re.split(r"\s+EL\s+\d{1,2}/\d{1,2}\b", m.descripcion or "")[0]
+    t = re.sub(r"\d{1,2}/\d{2}(/\d{2,4})?", " ", t)
+    t = re.sub(r"\b\d{4,}\b", " ", t)
     t = re.sub(r"\s+", " ", t).strip(" -.:")
     return t or "Sin descripción"
 

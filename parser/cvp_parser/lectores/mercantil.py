@@ -25,7 +25,7 @@ from typing import Optional, Sequence
 
 import pdfplumber
 
-from ..modelo import Extracto, Movimiento, ResultadoLectura, TotalesBanco
+from ..modelo import Extracto, Movimiento, Origen, ResultadoLectura, TotalesBanco
 from ..montos import CERO, monto_ve
 
 BANCO = "MERCANTIL"
@@ -33,6 +33,7 @@ AMT = r"\d{1,3}(?:\.\d{3})*,\d{2}"
 MONTO_COL = re.compile(r"^(" + AMT + r")(\d{6})?$")     # monto, con o sin el nº de control pegado
 FECHA = re.compile(r"^\d{2}/\d{2}$")
 CONTROL = re.compile(r"^\d{6}$")
+ORPH = re.compile(r"^EL \d{2}-\d{2}-\d{2} A LAS \d{2}:\d{2}:\d{2} HORAS$")
 
 
 def _texto(ruta: Path, pagina: Optional[int] = None) -> str:
@@ -71,12 +72,12 @@ class LectorMercantil:
             "cuenta": "-".join(mcta.groups()[:4]),
             "desde": _fecha_aa(mcta.group(5)), "hasta": _fecha_aa(mcta.group(6)),
             "inicio": uno(r"SALDO AL INICIO DEL PERIODO:\s*\d{2}-\d{2}-\d{2}\s+(-?" + AMT + ")"),
-            "depositos": uno(r"DEPOSITOS EFECTUADOS POR\s+(" + AMT + ")"),
-            "n_cre": uno(r"(\d+)\s+OTROS CREDITOS A SU CUENTA POR"),
-            "creditos": uno(r"OTROS CREDITOS A SU CUENTA POR\s+(" + AMT + ")"),
-            "cheques": uno(r"CHEQUES DEBITADOS POR\s+(" + AMT + ")"),
-            "n_deb": uno(r"(\d+)\s+OTROS DEBITOS A SU CUENTA POR"),
-            "debitos": uno(r"OTROS DEBITOS A SU CUENTA POR\s+(" + AMT + ")"),
+            "depositos": uno(r"DEPOSITOS EFECTUADOS(?:\s+POR)?\s+(" + AMT + ")"),
+            "n_cre": uno(r"(\d+)\s+OTROS CREDITOS A SU CUENTA"),
+            "creditos": uno(r"OTROS CREDITOS A SU CUENTA(?:\s+POR)?\s+(" + AMT + ")"),
+            "cheques": uno(r"CHEQUES DEBITADOS(?:\s+POR)?\s+(" + AMT + ")"),
+            "n_deb": uno(r"(\d+)\s+OTROS DEBITOS A SU CUENTA"),
+            "debitos": uno(r"OTROS DEBITOS A SU CUENTA(?:\s+POR)?\s+(" + AMT + ")"),
             "igtf": uno(r"IMPUESTO AL IGTF\s+(" + AMT + ")"),
             "final": uno(r"SALDO AL FINAL DEL PERIODO:\s*\d{2}-\d{2}-\d{2}\s+(-?" + AMT + ")"),
         }
@@ -92,6 +93,14 @@ class LectorMercantil:
     # ------------------------------------------------------------ detalle
     def _leer_uno(self, ruta: Path) -> Extracto:
         res = self._resumen(ruta)
+        with pdfplumber.open(str(ruta)) as pdf:
+            enc = {w["text"] for w in pdf.pages[1].extract_words()} if len(pdf.pages) > 1 else set()
+        if {"CARGOS", "ABONOS", "SALDO"} <= enc:
+            return self._leer_movimientos_de_cuenta(ruta, res)
+        return self._leer_debitos_creditos(ruta, res)
+
+    # ------------------------------------------------------------ variante A: débitos y créditos por sección
+    def _leer_debitos_creditos(self, ruta: Path, res: dict) -> Extracto:
         hasta: dt.date = res["hasta"]
 
         def fecha(ddmm: str) -> dt.date:
@@ -196,15 +205,143 @@ class LectorMercantil:
                 errores.append(f"El total de OTROS {sec} al pie del detalle ({totales_detalle[sec]}) no coincide "
                                f"con el de la página 1 ({res[clave]}).")
 
-        cero = lambda k: monto_ve(res[k]) if res.get(k) else CERO
-        tb = TotalesBanco(
-            saldo_anterior=monto_ve(res["inicio"]), nuevo_saldo=monto_ve(res["final"]),
-            total_debitos=monto_ve(res["debitos"]) + cero("cheques") + cero("igtf"),
-            total_creditos=monto_ve(res["creditos"]) + cero("depositos"),
-            nro_debitos=int(res["n_deb"]) if res.get("n_deb") else None,
-            nro_creditos=int(res["n_cre"]) if res.get("n_cre") else None,
-        )
-        if cero("igtf") or any(o["impuesto"] for o in ops):
+        tb = _totales(res)
+        if any(o["impuesto"] for o in ops):
             tb.nro_debitos = None      # el IGTF se carga como línea aparte: el conteo del banco no lo incluye
         return Extracto(BANCO, res["cuenta"], res["desde"], hasta, monto_ve(res["inicio"]), movs, tb,
                         titular=res["titular"], archivo=ruta.name, errores_lectura=errores, avisos_lectura=avisos)
+
+    # ------------------------------------------------------------ variante B: «MOVIMIENTOS DE CUENTA»
+    def _leer_movimientos_de_cuenta(self, ruta: Path, res: dict) -> Extracto:
+        """Cuenta personal (p. ej. 0105-0121-14-1121252354, sept. 2026): en cada mitad de página
+        FECHA | NUMERO | DESCRIPCION | CARGOS | ABONOS | SALDO | IMPUESTO, en orden cronológico. El saldo solo
+        viene en algunas líneas. A veces el banco no imprime una operación y solo deja su línea
+        «EL dd-mm-aa A LAS hh:mm:ss HORAS»: su monto se deduce por la diferencia con el siguiente saldo impreso
+        (queda marcado como DEDUCIDO y el cuadre lo avisa). Después de los movimientos vienen secciones
+        informativas (operaciones Mercantil en Línea, puntos de venta) que no son movimientos de la cuenta."""
+        hasta: dt.date = res["hasta"]
+
+        def fecha(dd: str, mm: str) -> dt.date:
+            d, m = int(dd), int(mm)
+            return dt.date(hasta.year - (1 if m > hasta.month else 0), m, d)
+
+        errores: list[str] = []
+        avisos: list[str] = []
+        ops: list[dict] = []
+        saldo_inicio_detalle = None
+        fin = False
+        with pdfplumber.open(str(ruta)) as pdf:
+            for pi, p in enumerate(pdf.pages[1:], 2):
+                if fin:
+                    break
+                mitad = p.width / 2
+                palabras = p.extract_words(x_tolerance=1.2, y_tolerance=2)
+                for lado in (0, 1):
+                    if fin:
+                        break
+                    off = 0 if lado == 0 else mitad - 8
+                    filas: dict[int, list[dict]] = {}
+                    for w in palabras:
+                        if (w["x0"] < mitad) != (lado == 0):
+                            continue
+                        k = round(w["top"])
+                        clave = next((f for f in filas if abs(f - k) <= 2), k)
+                        filas.setdefault(clave, []).append({"t": w["text"], "x0": w["x0"] - off, "x1": w["x1"] - off})
+                    for top in sorted(filas):
+                        toks = sorted(filas[top], key=lambda t: t["x0"])
+                        txt = " ".join(t["t"] for t in toks)
+                        up = txt.upper()
+                        if "OPERACIONES CON SU LLAVE" in up or up == "MERCANTIL EN LINEA" or up == "PUNTOS DE VENTA":
+                            fin = True
+                            break
+                        if up.startswith(("MOVIMIENTOS DE CUENTA", "FECHA ", "TRANSACCION")):
+                            continue
+                        if len(toks) == 1 and re.fullmatch(r"\d+", txt) and toks[0]["x0"] > 100:
+                            continue                         # número de página
+                        d = [t for t in toks if t["x0"] < 27]
+                        num = [t for t in toks if 27 <= t["x0"] < 50]
+                        montos = [t for t in toks if t["x0"] >= 165 and re.fullmatch(AMT, t["t"])]
+                        desc = " ".join(t["t"] for t in toks if t["x0"] >= 50 and t not in montos)
+                        cols: dict[str, object] = {}
+                        for a in montos:
+                            x = a["x1"]
+                            col = "cargo" if x <= 210 else "abono" if x <= 250 else "saldo" if x <= 300 else "imp"
+                            cols[col] = monto_ve(a["t"])
+                        if d:
+                            dd, mm = (d[0]["t"].split("/") if "/" in d[0]["t"]
+                                      else (d[0]["t"], d[1]["t"] if len(d) > 1 else ""))
+                            if not (dd.isdigit() and mm.isdigit()):
+                                errores.append(f"página {pi}: fecha no reconocida «{txt}»")
+                                continue
+                            if "SALDO AL INICIO" in up:
+                                saldo_inicio_detalle = cols.get("saldo")
+                                continue
+                            if "SALDO AL FINAL" in up or "SALDO FINAL" in up:
+                                continue
+                            ops.append({"fecha": fecha(dd, mm), "numero": " ".join(t["t"] for t in num), "desc": desc,
+                                        "detalle": [], "pag": pi, "huerfano": False, **cols})
+                        elif desc and ops:
+                            ult = ops[-1]
+                            if ORPH.match(desc) and not montos and (
+                                    ult["huerfano"] or any(ORPH.match(x) for x in ult["detalle"])):
+                                ops.append({"fecha": ult["fecha"], "numero": "", "desc": "MOVIMIENTO NO IMPRESO EN EL PDF",
+                                            "detalle": [desc], "pag": pi, "huerfano": True})
+                                continue
+                            ult["detalle"].append(desc)
+                            for k, v in cols.items():
+                                ult.setdefault(k, v)
+                        elif montos and ops:
+                            for k, v in cols.items():
+                                ops[-1].setdefault(k, v)
+
+        saldo_ini = monto_ve(res["inicio"])
+        if saldo_inicio_detalle is not None and saldo_inicio_detalle != saldo_ini:
+            errores.append(f"El saldo al inicio del detalle ({saldo_inicio_detalle}) no coincide con el de la página 1 "
+                           f"({saldo_ini}).")
+        # Montos no impresos: se deducen por diferencia con el siguiente saldo impreso.
+        bal, pend = saldo_ini, []
+        for o in ops:
+            if o["huerfano"]:
+                pend.append(o)
+                continue
+            bal = bal - o.get("cargo", CERO) + o.get("abono", CERO)
+            if o.get("saldo") is not None:
+                gap = bal - o["saldo"]
+                if pend and gap:
+                    tgt = pend[-1]
+                    tgt["cargo" if gap > 0 else "abono"] = abs(gap)
+                    if len(pend) > 1:
+                        tgt["nota"] = f"monto combinado de {len(pend)} movimientos no impresos"
+                    bal = o["saldo"]
+                pend = []
+        movs: list[Movimiento] = []
+        for o in ops:
+            cargo, abono = o.get("cargo", CERO), o.get("abono", CERO)
+            if o["huerfano"] and not (cargo or abono):
+                avisos.append(f"{o['fecha']:%d/%m}: línea «{o['detalle'][0]}» sin movimiento (no cambió el saldo).")
+                continue
+            if cargo and abono:
+                errores.append(f"página {o['pag']}: la operación {o['numero']} tiene cargo y abono a la vez")
+            movs.append(Movimiento(o["fecha"], o["desc"], debito=cargo, credito=abono, saldo=o.get("saldo"),
+                                   referencia=o["numero"], detalle=" ".join(o["detalle"]), fecha_real=o["fecha"],
+                                   pagina=o["pag"], origen=Origen.DEDUCIDO if o["huerfano"] else Origen.IMPRESO,
+                                   nota=o.get("nota", "")))
+            if o.get("imp"):
+                avisos.append(f"{o['fecha']:%d/%m} {o['desc']}: impuesto (IGTF) {o['imp']} en la columna IMPUESTO")
+        return Extracto(BANCO, res["cuenta"], res["desde"], hasta, saldo_ini, movs, _totales(res),
+                        titular=res["titular"], archivo=ruta.name, errores_lectura=errores, avisos_lectura=avisos)
+
+
+def _totales(res: dict) -> TotalesBanco:
+    """Totales de la página 1 (comunes a las dos variantes)."""
+    cero = lambda k: monto_ve(res[k]) if res.get(k) else CERO
+    tb = TotalesBanco(
+        saldo_anterior=monto_ve(res["inicio"]), nuevo_saldo=monto_ve(res["final"]),
+        total_debitos=monto_ve(res["debitos"]) + cero("cheques") + cero("igtf"),
+        total_creditos=monto_ve(res["creditos"]) + cero("depositos"),
+        nro_debitos=int(res["n_deb"]) if res.get("n_deb") else None,
+        nro_creditos=int(res["n_cre"]) if res.get("n_cre") else None,
+    )
+    if cero("igtf"):
+        tb.nro_debitos = None      # el IGTF se carga como línea aparte: el conteo del banco no lo incluye
+    return tb
