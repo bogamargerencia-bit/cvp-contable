@@ -112,6 +112,14 @@ REGLAS: dict[str, list[tuple[str, str, str]]] = {
         (r"PAGO ?MOVIL|PAGOMOVIL", D, S_PAGO_MOVIL),
         (r"TRF CR INM|TRANS,?CTAS|TRANSF", D, S_TRANSF),
     ],
+    "ACTIVO": [
+        (r"^N/C CRED I", C, E_TRANSF),
+        (r"^CARGO POR MANTENIMIENTO|^CARGO EMISION EDO|^CARGO SERVICIO SMS|^COM EDO CTA", D, S_CARGOS),
+        (r"^N/D COM\.|^COM ", D, S_COMISION),
+        (r"^PAGO SENIAT", D, S_IMPUESTOS),
+        (r"^TRANS\.PROPIA", D, S_TRASLADO),
+        (r"^N/D CRED I", D, S_TRANSF),
+    ],
     "MERCANTIL": [
         (r"^CANCELACION RESUMEN DE VENTAS", C, E_POS_LIQ),
         (r"^REINTEGRO COMISION|^DEVOLUCION CREDITO INMEDIATO", C, E_REVERSO),
@@ -141,7 +149,7 @@ REGLAS: dict[str, list[tuple[str, str, str]]] = {
 # Reglas comunes a todos los bancos (después de las del banco): conceptos que se repiten entre bancos.
 REGLAS_COMUNES: list[tuple[str, str, str]] = [
     # Comisiones de punto de venta por marca de tarjeta y cargo BCV por terminal (Inversiones PTS, ago. 2026).
-    (r"^S\.(MAST|DISG|VISA|MAES|AMEX|DINE)\b|BCV\.C\.O\.TPV", D, S_COMISION),
+    (r"^S\.(MAST|DISG|VISA|MAES|AMEX|DINE|INTE)\b|^(BCV\.)?C\.O\.TPV", D, S_COMISION),
 ]
 
 

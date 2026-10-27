@@ -30,8 +30,14 @@ def tipo_de(m: Movimiento) -> str:
     fecha y hora incrustadas («… EL 21/09/2026 A LAS …», «.08/26») y números de referencia (4+ dígitos)."""
     t = re.split(r"\s+EL\s+\d{1,2}/\d{1,2}\b", m.descripcion or "")[0]
     t = re.sub(r"\d{1,2}/\d{2}(/\d{2,4})?", " ", t)
+    t = re.sub(r"(?<=[A-Z])\d{4}[JVEGP]\d{6,9}\b", " ", t)          # banco + RIF pegados (Activo: «I0134J303836216»)
+    t = re.sub(r"\b(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC)[a-z]*\d{2}\b", " ", t, flags=re.I)  # «Jul26»
+    t = re.sub(r"\b(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SEPTIEMBRE|SETIEMBRE|OCTUBRE|NOVIEMBRE|"
+               r"DICIEMBRE)\b", " ", t)
+    t = re.sub(r"\b\d+/\d+\b", " ", t)                                 # cuotas «1/4»
     t = re.sub(r"\b\d{4,}\b", " ", t)
     t = re.sub(r"\s+", " ", t).strip(" -.:")
+    t = re.sub(r"[\s.\-]+$", "", t)
     return t or "Sin descripción"
 
 

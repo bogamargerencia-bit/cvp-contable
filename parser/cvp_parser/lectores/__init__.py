@@ -7,6 +7,7 @@ from .plaza import LectorPlaza
 from .venezolano import LectorVenezolano
 from .mercantil import LectorMercantil
 from .banesco import LectorBanesco
+from .activo import LectorActivo
 
 LECTORES = {
     "100_BANCO": LectorBanco100(),
@@ -17,10 +18,11 @@ LECTORES = {
     "BANCAMIGA": LectorBancamiga(),
     "MERCANTIL": LectorMercantil(),
     "BANESCO": LectorBanesco(),
+    "ACTIVO": LectorActivo(),
 }
 
 __all__ = ["LECTORES", "LectorBanco100", "LectorBNC", "LectorBanplus", "LectorPlaza", "LectorVenezolano",
-           "LectorBancamiga", "LectorMercantil", "LectorBanesco", "leer_estado"]
+           "LectorBancamiga", "LectorMercantil", "LectorBanesco", "LectorActivo", "leer_estado"]
 
 
 NOMBRES = {"100_BANCO": "100% Banco", "BNC": "BNC", "BANPLUS": "Banplus", "PLAZA": "Banco Plaza",
