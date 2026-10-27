@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     destino.pathname = siguiente;
   } else {
     destino.pathname = "/recuperar";
-    destino.searchParams.set("error", "El enlace no es válido o ya venció (dura 1 hora y sirve una sola vez). Pide uno nuevo.");
+    destino.searchParams.set("error", "El enlace no funcionó: ya venció o se usó, hay un correo más reciente, o se abrió en otro navegador o dispositivo. Pide uno nuevo (una sola vez) y ábrelo en este navegador, o pide al administrador una contraseña temporal.");
   }
   return NextResponse.redirect(destino);
 }

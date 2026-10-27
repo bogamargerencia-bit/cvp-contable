@@ -14,6 +14,11 @@ export default async function Recuperar({ searchParams }: PageProps<"/recuperar"
         <form action={pedirEnlace} className="tarjeta space-y-4 p-6">
           <Mensajes error={error} ok={ok} />
           <p className="text-sm text-tenue">Escribe tu correo y te enviaremos un enlace para crear una contraseña nueva.</p>
+          <p className="text-xs text-tenue">
+            Importante: pídelo <span className="font-medium">una sola vez</span> y abre el enlace del correo{" "}
+            <span className="font-medium">más reciente</span>, en <span className="font-medium">este mismo navegador</span>.
+            Cada pedido anula el enlace anterior, y el enlace no funciona en otro dispositivo.
+          </p>
           <div>
             <label htmlFor="email" className="etiqueta">Correo</label>
             <input id="email" name="email" type="email" autoComplete="email" required className="campo" />
