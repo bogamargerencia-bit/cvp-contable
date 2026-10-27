@@ -10,9 +10,10 @@ from cvp_parser.cuadre import Estado, cuadrar_extracto
 from cvp_parser.lectores import LECTORES
 
 PDF = Path(__file__).parent / "fixtures" / "banesco_2026_08" / "edo_banesco.pdf"
-pytestmark = pytest.mark.skipif(not PDF.exists(), reason="falta el estado de cuenta real de Banesco")
+SIN_PDF = pytest.mark.skipif(not PDF.exists(), reason="falta el estado de cuenta real de Banesco")
 
 
+@SIN_PDF
 def test_lee_y_cuadra():
     assert LECTORES["BANESCO"].reconoce(PDF)
     assert not [k for k, l in LECTORES.items() if k != "BANESCO" and l.reconoce(PDF)]
@@ -30,9 +31,22 @@ def test_lee_y_cuadra():
         dt.date(2026, 8, 18), "03617656953", "TRANS,CTAS", D("10122.63"))
 
 
+@SIN_PDF
 def test_conversion():
     conv = convertir("PTS", "2026-08", [("Banesco 7692", "BANESCO", PDF)])
     assert conv.todo_cuadra
     its = {(i.naturaleza, i.concepto): i for i in items(conv.cuentas[0].movs)}
     assert its[("Cargos bancarios (mantenimiento, estado de cuenta, SMS)", "EMISION DE ESTADO DE CUENTA")].debitos == D("54.00")
     assert sum(i.creditos for i in its.values() if i.naturaleza == "Transferencias recibidas") == D("285854.41")
+
+
+
+@pytest.mark.parametrize("desc", ["S.MAST.29082026-821908302", "S.DISG.31082026-821908303", "BCV.C.O.TPV.08/26-821908303"])
+def test_comisiones_punto_de_venta_en_cualquier_banco(desc):
+    """Inversiones PTS: comisiones por marca de tarjeta y cargo BCV por terminal = comisiones (todo banco)."""
+    from cvp_parser.cargos import tipo_de
+    from cvp_parser.modelo import Movimiento
+    from cvp_parser.naturaleza import S_COMISION, clasificar
+    m = Movimiento(dt.date(2026, 8, 31), desc, debito=D("794.99"))
+    assert all(clasificar(b, m) == S_COMISION for b in ("BANESCO", "BNC", "OTRO_BANCO"))
+    assert tipo_de(m) in ("S.MAST", "S.DISG", "BCV.C.O.TPV.08/26")

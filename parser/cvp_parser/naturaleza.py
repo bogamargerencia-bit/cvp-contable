@@ -131,10 +131,17 @@ REGLAS: dict[str, list[tuple[str, str, str]]] = {
 }
 
 
+# Reglas comunes a todos los bancos (después de las del banco): conceptos que se repiten entre bancos.
+REGLAS_COMUNES: list[tuple[str, str, str]] = [
+    # Comisiones de punto de venta por marca de tarjeta y cargo BCV por terminal (Inversiones PTS, ago. 2026).
+    (r"^S\.(MAST|DISG|VISA|MAES|AMEX|DINE)\b|BCV\.C\.O\.TPV", D, S_COMISION),
+]
+
+
 def clasificar(banco: str, m: Movimiento) -> str:
     texto = f"{m.descripcion} | {m.detalle} | {m.nota}"
     sentido = D if m.debito else C
-    for patron, dirc, nat in REGLAS.get(banco, []):
+    for patron, dirc, nat in REGLAS.get(banco, []) + REGLAS_COMUNES:
         if dirc == sentido and re.search(patron, texto, re.I):
             return nat
     return OTROS
