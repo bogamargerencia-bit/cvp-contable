@@ -111,7 +111,7 @@ def test_falta_un_archivo(tmp_path):
 def test_banco_sin_lector(tmp_path):
     sb = FakeSB()
     c, p = sb.cliente("X", None)
-    k = sb.cuenta(c, "Activo", banco="ACTIVO")
+    k = sb.cuenta(c, "Banco X", banco="BANCO_SIN_LECTOR")
     sb.archivo(p, Path(__file__), "estado_cuenta", k)
     with pytest.raises(ErrorCorrida, match="todavía no tiene lector"):
         armar_entrada(c, p, sb.select("archivos"), sb.descargar, tmp_path)
