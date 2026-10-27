@@ -65,6 +65,7 @@ export const BANCOS: { codigo: string; nombre: string; pendiente?: boolean }[] =
   { codigo: "BANCAMIGA", nombre: "Bancamiga" },
   { codigo: "ACTIVO", nombre: "Banco Activo", pendiente: true },
   { codigo: "MERCANTIL", nombre: "Mercantil" },
+  { codigo: "BANESCO", nombre: "Banesco" },
 ];
 
 /** Claves de configuración que existen en parser/cvp_parser/clientes.py. */

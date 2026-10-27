@@ -103,6 +103,14 @@ REGLAS: dict[str, list[tuple[str, str, str]]] = {
         (r"RETENCION I\.S\.L\.R", D, S_ISLR),
         (r"^CRED\.INM(ED)?\.ENV", D, S_TRANSF),     # a terceros o a cuenta propia (MISMO TIT): ver marcar_traslados
     ],
+    "BANESCO": [
+        (r"PAGO ?MOVIL|PAGOMOVIL", C, E_PAGO_MOVIL),
+        (r"TRF CR INM|TRANS,?CTAS|TRANSF", C, E_TRANSF),
+        (r"MTTO CTA|EMISION DE ESTADO|SMS", D, S_CARGOS),    # antes que comisión: «COM,SERV.MTTO CTA»
+        (r"^COM|COMISION", D, S_COMISION),
+        (r"PAGO ?MOVIL|PAGOMOVIL", D, S_PAGO_MOVIL),
+        (r"TRF CR INM|TRANS,?CTAS|TRANSF", D, S_TRANSF),
+    ],
     "MERCANTIL": [
         (r"CREDITO INMEDIATO|TRANSFERENCIA RECIBIDA", C, E_TRANSF),
         (r"^COMISION", D, S_COMISION),                       # antes que nómina: «COMISION POR … PAGO NOMINA»
