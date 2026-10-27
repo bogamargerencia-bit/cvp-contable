@@ -19,7 +19,7 @@ from typing import Optional
 from .conciliacion import CONCILIADOS, EstadoPartida, ResultadoConciliacion, conciliar_cliente
 from .conciliacion_caja import ResultadoCaja, conciliar_caja
 from .cuadre import ResultadoCuadre, cuadrar
-from .lectores import LECTORES
+from .lectores import LECTORES, leer_estado
 from .modelo import Extracto
 from .naturaleza import S_NOMINA, S_TRANSF, MovClasificado, clasificar_extracto, marcar_traslados
 from .sistema import LibroBanco, leer_libro
@@ -55,11 +55,7 @@ def procesar_cliente(cliente: str, periodo: str,
     libros: dict[str, LibroBanco] = {}
     alertas: list[str] = []
     for banco, edo, sist in archivos:
-        lector = LECTORES[banco]
-        res = lector.leer([Path(edo)])
-        if len(res.extractos) != 1:
-            raise ValueError(f"{banco}: se esperaba 1 extracto en {edo}, hay {len(res.extractos)}")
-        extractos[banco] = res.extractos[0]
+        extractos[banco] = leer_estado(banco, Path(edo))
         libros[banco] = leer_libro(Path(sist))
 
     cuadres = {r.extracto.banco: r for r in cuadrar(extractos.values())}

@@ -26,7 +26,7 @@ from openpyxl.styles import Alignment
 
 from .cargos import tipo_de
 from .cuadre import Estado, ResultadoCuadre, cuadrar_extracto
-from .lectores import LECTORES
+from .lectores import leer_estado
 from .modelo import Extracto
 from .montos import CERO
 from .naturaleza import ORDEN, MovClasificado, clasificar_extracto, marcar_traslados
@@ -69,13 +69,7 @@ def convertir(cliente: str, periodo: str, archivos: list[tuple[str, str, Path]])
     """archivos: [(nombre de la cuenta, banco, estado de cuenta), ...]. Admite varias cuentas del mismo banco."""
     conv = Conversion(cliente, periodo)
     for nombre, banco, ruta in archivos:
-        if banco not in LECTORES:
-            raise ValueError(f"«{nombre}»: el banco {banco} todavía no tiene lector (disponibles: {', '.join(LECTORES)}).")
-        res = LECTORES[banco].leer([Path(ruta)])
-        if len(res.extractos) != 1:
-            raise ValueError(f"«{nombre}»: se esperaba un estado de cuenta en {Path(ruta).name}, "
-                             f"se encontraron {len(res.extractos)}.")
-        e = res.extractos[0]
+        e = leer_estado(banco, Path(ruta), nombre)
         conv.cuentas.append(CuentaConvertida(nombre, banco, e, cuadrar_extracto(e), clasificar_extracto(e)))
     marcar_traslados([c.movs for c in conv.cuentas])
     return conv

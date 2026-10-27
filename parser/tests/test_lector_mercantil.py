@@ -86,3 +86,15 @@ def test_variante_personal_conceptos():
     assert its[("Pagos por transferencia / crédito inmediato", "OPERACION DE CREDITO INMEDIATO - TRANSF. PRES")].n == 232
     assert its[("Cobros POS – liquidación de ventas", "CANCELACION RESUMEN DE VENTAS Y RETENCIONES")].creditos == D("32709589.57")
     assert its[("Comisiones bancarias", "DESCUENTO TARJETA")].n == 52
+
+
+def test_archivo_de_otro_banco_mensaje_claro(tmp_path):
+    """Pistazie: un PDF de otro banco subido en una cuenta de Banplus. Antes salía un error interno de openpyxl;
+    ahora el mensaje dice de qué banco parece el archivo."""
+    from cvp_parser.lectores import leer_estado
+    with pytest.raises(ValueError, match=r"parece un estado de cuenta de Mercantil"):
+        leer_estado("BANPLUS", PDF, "Banplus")
+    falso = tmp_path / "09 ESTADO DE CUENTA BANCO ACTIVO.pdf"
+    falso.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    with pytest.raises(ValueError, match=r"\(PDF\) no se pudo leer como estado de cuenta de «Banplus» \(Banplus\)"):
+        leer_estado("BANPLUS", falso, "Banplus")
