@@ -72,6 +72,9 @@ class TotalesBanco:
     nro_operaciones: Optional[int] = None   # Activo: un solo conteo
     nro_debitos: Optional[int] = None       # Mercantil: conteos separados
     nro_creditos: Optional[int] = None
+    # Resumen tal como lo imprime el banco (Banesco: Cheques Pagados, Otros Débitos, Depósitos, Otros
+    # Créditos, saldos Inicial / Final / Promedio): (concepto, cantidad o None, monto). Solo informativo.
+    lineas: list[tuple[str, Optional[int], Optional[Decimal]]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         for campo in ("saldo_anterior", "nuevo_saldo", "total_debitos", "total_creditos"):

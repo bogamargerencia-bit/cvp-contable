@@ -100,7 +100,8 @@ class LectorBanesco:
         r = {"mes": int(mp.group(1)), "anio": int(mp.group(2)), "cuenta": mc.group(1),
              "cheques": par(r"Cheques Pagados"), "debitos": par(r"Otros D[eé]bitos"),
              "depositos": par(r"Dep[oó]sitos"), "creditos": par(r"Otros Cr[eé]ditos"),
-             "inicial": uno(r"\n\s*Inicial"), "final": uno(r"\n\s*Final")}
+             "inicial": uno(r"\n\s*Inicial"), "final": uno(r"\n\s*Final"),
+             "promedio": uno(r"\n\s*Promedio")}
         faltan = [k for k in ("debitos", "creditos") if r[k][1] is None] + \
                  [k for k in ("inicial", "final") if r[k] is None]
         if faltan:
@@ -235,7 +236,12 @@ class LectorBanesco:
         n_cre, m_cre = res["creditos"]
         tb = TotalesBanco(saldo_anterior=monto_ve(res["inicial"]), nuevo_saldo=monto_ve(res["final"]),
                           total_debitos=cero(m_deb) + cero(m_chq), total_creditos=cero(m_cre) + cero(m_dep),
-                          nro_debitos=(n_deb or 0) + (n_chq or 0), nro_creditos=(n_cre or 0) + (n_dep or 0))
+                          nro_debitos=(n_deb or 0) + (n_chq or 0), nro_creditos=(n_cre or 0) + (n_dep or 0),
+                          lineas=[("Cheques Pagados", n_chq, cero(m_chq)), ("Otros Débitos", n_deb, cero(m_deb)),
+                                  ("Depósitos", n_dep, cero(m_dep)), ("Otros Créditos", n_cre, cero(m_cre)),
+                                  ("Saldo Inicial", None, monto_ve(res["inicial"])),
+                                  ("Saldo Final", None, monto_ve(res["final"]))]
+                          + ([("Saldo Promedio", None, monto_ve(res["promedio"]))] if res["promedio"] else []))
         hasta = (dt.date(anio + (mes == 12), mes % 12 + 1, 1) - dt.timedelta(days=1))
         return Extracto(BANCO, res["cuenta"], dt.date(anio, mes, 1), hasta, saldo_ant, movs, tb,
                         titular=titular, archivo=ruta.name, errores_lectura=errores)

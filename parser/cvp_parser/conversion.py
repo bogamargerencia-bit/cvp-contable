@@ -100,6 +100,46 @@ def _hoja_nombre(nombre: str, usados: set[str]) -> str:
     return n
 
 
+def _resumen_banco(ws, r: int, e, fila_tot: int, ultima: int) -> None:
+    """Debajo del detalle: el resumen que imprime el banco y la comparación contra el detalle convertido."""
+    from .exportar import B, NOTA, NUM, SUB, TOT, _fila
+
+    tb = e.totales_banco
+    if tb is None:
+        return
+    if tb.lineas:
+        ws.cell(r, 4, "Resumen del banco (tal como aparece en el estado de cuenta)").font = SUB
+        _fila(ws, r + 1, [None, None, None, "Concepto", "Cantidad", "Monto (Bs.)"], font=B, fill=TOT)
+        r += 2
+        for concepto, n, monto in tb.lineas:
+            _fila(ws, r, [None, None, None, concepto, n, monto], {6: NUM})
+            r += 1
+        r += 1
+    ws.cell(r, 4, "Comparación: banco vs. detalle convertido").font = SUB
+    _fila(ws, r + 1, [None, None, None, "Concepto", "Cantidad (banco)", "Monto banco (Bs.)", "Cantidad (detalle)",
+                      "Monto detalle (Bs.)", "Diferencia (debe ser 0)"], font=B, fill=TOT)
+    r += 2
+    hay = ultima >= 5
+    filas = [
+        ("Saldo inicial", None, tb.saldo_anterior, None, "=$H$2"),
+        ("Débitos", tb.nro_debitos, tb.total_debitos,
+         f'=COUNTIF(F5:F{ultima},">0")' if hay else 0, f"=F{fila_tot}"),
+        ("Créditos", tb.nro_creditos, tb.total_creditos,
+         f'=COUNTIF(G5:G{ultima},">0")' if hay else 0, f"=G{fila_tot}"),
+        ("Saldo final", None, tb.nuevo_saldo, None, f"=I{ultima}" if hay else "=$H$2"),
+    ]
+    if tb.nro_operaciones is not None:
+        filas.insert(3, ("Nº de operaciones", tb.nro_operaciones, None,
+                         f'=COUNTIF(F5:F{ultima},">0")+COUNTIF(G5:G{ultima},">0")' if hay else 0, None))
+    for concepto, n_b, m_b, n_d, m_d in filas:
+        dif = f"=ROUND(N(F{r})-N(H{r}),2)" if m_b is not None and m_d else \
+            (f"=N(E{r})-N(G{r})" if n_b is not None and m_b is None else None)
+        _fila(ws, r, [None, None, None, concepto, n_b, m_b, n_d, m_d, dif], {6: NUM, 8: NUM, 9: NUM})
+        ws.cell(r, 9).font = B
+        r += 1
+    ws.cell(r, 4, "Un monto del banco vacío = el banco no lo imprime; no se compara.").font = NOTA
+
+
 def excel_conversion(conv: Conversion, salida: Path) -> Path:
     from .exportar import B, BLANCA, ENC, F, FECHA, LINEA, NOTA, NUM, ROJA, SUB, TIT, TOT, VERDE_TXT, _enc, _fila, _q
 
@@ -144,6 +184,7 @@ def excel_conversion(conv: Conversion, salida: Path) -> Path:
         if ultima >= 5:
             cel = ws.cell(r + 1, 9, f"=ROUND(I{ultima}-H{ultima},2)")
             cel.font, cel.number_format = B, NUM
+        _resumen_banco(ws, r + 3, e, r, ultima)
         ws.freeze_panes = "A5"
         ws.auto_filter.ref = f"A4:L{max(ultima, 4)}"
         h = _q(nombre)
