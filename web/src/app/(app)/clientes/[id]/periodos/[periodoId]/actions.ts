@@ -7,6 +7,9 @@ import { MINUTOS_EN_COLA } from "@/lib/tipos";
 import { crearClienteAdmin } from "@/lib/supabase/admin";
 import { crearClienteServidor } from "@/lib/supabase/server";
 
+// Con el plan Free de Railway (serverless) el servicio se duerme sin uso y tarda en despertar.
+const SEGUNDOS_ESPERA_SERVICIO = 60;
+
 const MENSAJE_ATASCADA =
   `El servicio no tomó la corrida en ${MINUTOS_EN_COLA} minutos (¿variables de Railway o servicio detenido?). Vuelve a procesar.`;
 
@@ -57,15 +60,20 @@ export async function procesar(f: FormData) {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ corrida_id: corrida.id }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(SEGUNDOS_ESPERA_SERVICIO * 1000),
         cache: "no-store",
       });
       if (resp.status !== 202) {
         const cuerpo = await resp.json().catch(() => null);
-        fallo = typeof cuerpo?.detail === "string" ? cuerpo.detail : `El servicio respondió ${resp.status}.`;
+        fallo = typeof cuerpo?.detail === "string" ? cuerpo.detail
+          : resp.status === 404
+            ? "El servicio respondió 404: Railway no tiene la aplicación activa (revisa el plan o si el servicio está detenido)."
+            : `El servicio respondió ${resp.status}.`;
       }
-    } catch {
-      fallo = "No se pudo contactar al servicio de procesamiento (¿está encendido en Railway?).";
+    } catch (e) {
+      fallo = e instanceof Error && e.name === "TimeoutError"
+        ? `El servicio no respondió en ${SEGUNDOS_ESPERA_SERVICIO} segundos (puede estar despertando en Railway). Vuelve a procesar.`
+        : "No se pudo contactar al servicio de procesamiento (¿está encendido en Railway?).";
     }
   }
   if (fallo) {

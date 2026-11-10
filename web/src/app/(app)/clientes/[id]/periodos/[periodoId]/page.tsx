@@ -11,6 +11,9 @@ import { formatoVE } from "@/lib/montos";
 import { MESES, MINUTOS_EN_COLA, ahoraMs, modoDe, nombreBanco, type Cuenta } from "@/lib/tipos";
 import { cambiarEstadoPeriodo, procesar } from "./actions";
 
+// «Procesar» espera hasta 60 s a que el servicio de Railway despierte (plan serverless).
+export const maxDuration = 90;
+
 type Archivo = {
   id: string;
   cuenta_id: string | null;
