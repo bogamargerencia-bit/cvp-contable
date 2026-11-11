@@ -59,7 +59,9 @@ def procesar_cliente(cliente: str, periodo: str,
         libros[banco] = leer_libro(Path(sist))
 
     cuadres = {r.extracto.banco: r for r in cuadrar(extractos.values())}
-    clasificados = {b: clasificar_extracto(e) for b, e in extractos.items()}
+    from .clientes import config_de as _config_de
+    _cfg = _config_de(cliente)
+    clasificados = {b: clasificar_extracto(e, _cfg.reglas if _cfg else []) for b, e in extractos.items()}
     marcar_traslados(clasificados.values())
     conc = conciliar_cliente([(extractos[b], libros[b]) for b in extractos], dias=dias,
                              tolerancia_monto=tolerancia_monto,

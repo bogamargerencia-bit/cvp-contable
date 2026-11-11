@@ -14,7 +14,7 @@ import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 from .modelo import Extracto, Movimiento
 
@@ -124,9 +124,9 @@ REGLAS: dict[str, list[tuple[str, str, str]]] = {
         (r"^TD POS", C, E_POS_DEB),
         (r"^TC POS", C, E_POS_CRE),
         (r"^TRASP\.|^CR\.I/", C, E_TRANSF),
-        # mantenimiento de cuenta, emisión del estado y mantenimiento del punto de venta (como 100% Banco)
-        (r"^COM\.MTTO\.CTA|^COM\.EM\.EDO\.CTA|^COM MTTO POS", D, S_CARGOS),
-        (r"^COM TRF|^COMIS\.|^COM ", D, S_COMISION),          # transferencia a terceros, crédito inmediato
+        (r"^COM\.MTTO\.CTA|^COM\.EM\.EDO\.CTA", D, S_CARGOS),   # mantenimiento de cuenta, emisión del estado
+        # transferencia a terceros, crédito inmediato y mantenimiento del punto de venta («COM MTTO POS.»)
+        (r"^COM TRF|^COMIS\.|^COM ", D, S_COMISION),
         (r"^TRASP\.|^CR\.I/OB", D, S_TRANSF),
     ],
     "MERCANTIL": [
@@ -159,13 +159,19 @@ REGLAS: dict[str, list[tuple[str, str, str]]] = {
 REGLAS_COMUNES: list[tuple[str, str, str]] = [
     # Comisiones de punto de venta por marca de tarjeta y cargo BCV por terminal (Inversiones PTS, ago. 2026).
     (r"^S\.(MAST|DISG|VISA|MAES|AMEX|DINE|INTE)\b|^(BCV\.)?C\.O\.TPV", D, S_COMISION),
+    # Inversiones Platco: plataforma del punto de venta, cobra por domiciliación = comisión POS (nov. 2026).
+    (r"^INV\.PLATCO|^PAGO A LA EMPRESA INVERSIONES PLATCO", D, S_COMISION),
 ]
 
 
-def clasificar(banco: str, m: Movimiento) -> str:
+Regla = tuple[str, str, str]
+
+
+def clasificar(banco: str, m: Movimiento, reglas_cliente: Sequence[Regla] = ()) -> str:
+    """Primero las reglas del cliente (clientes.py), luego las del banco y por último las comunes."""
     texto = f"{m.descripcion} | {m.detalle} | {m.nota}"
     sentido = D if m.debito else C
-    for patron, dirc, nat in REGLAS.get(banco, []) + REGLAS_COMUNES:
+    for patron, dirc, nat in list(reglas_cliente) + REGLAS.get(banco, []) + REGLAS_COMUNES:
         if dirc == sentido and re.search(patron, texto, re.I):
             return nat
     return OTROS
@@ -180,8 +186,8 @@ class MovClasificado:
     contraparte: str = ""    # para traslados: "BNC 31/08/2026 ref ..."
 
 
-def clasificar_extracto(e: Extracto) -> list[MovClasificado]:
-    return [MovClasificado(e.banco, i, m, clasificar(e.banco, m)) for i, m in enumerate(e.movimientos)]
+def clasificar_extracto(e: Extracto, reglas_cliente: Sequence[Regla] = ()) -> list[MovClasificado]:
+    return [MovClasificado(e.banco, i, m, clasificar(e.banco, m, reglas_cliente)) for i, m in enumerate(e.movimientos)]
 
 
 def marcar_traslados(listas: Iterable[list[MovClasificado]], dias: int = 2) -> int:
@@ -191,8 +197,9 @@ def marcar_traslados(listas: Iterable[list[MovClasificado]], dias: int = 2) -> i
     Devuelve cuántos pares se marcaron.
     """
     todos = [x for l in listas for x in l]
-    salidas = [x for x in todos if x.naturaleza == S_TRANSF]
-    entradas = [x for x in todos if x.naturaleza == E_TRANSF]
+    # También los traslados que marcó una regla del cliente y aún no tienen contrapartida.
+    salidas = [x for x in todos if x.naturaleza == S_TRANSF or (x.naturaleza == S_TRASLADO and not x.contraparte)]
+    entradas = [x for x in todos if x.naturaleza == E_TRANSF or (x.naturaleza == E_TRASLADO and not x.contraparte)]
     usados: set[int] = set()
     pares = 0
     for s in salidas:

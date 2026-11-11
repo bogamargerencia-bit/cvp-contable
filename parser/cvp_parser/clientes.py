@@ -14,10 +14,12 @@ En la Fase 2 esto vivirá en la base de datos (tabla de configuración por clien
 """
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Optional
 
 from .divisas import CuentaDivisa
+from .naturaleza import E_TRASLADO, S_TRASLADO
 from .ventas import PAGO_MOVIL, POS, VUELTO
 
 
@@ -43,6 +45,8 @@ class ConfigCliente:
     medios: list[MedioCaja] = field(default_factory=list)       # vacío = detección automática
     asientos_resumen: list[AsientoResumen] = field(default_factory=list)
     divisas: list[CuentaDivisa] = field(default_factory=list)   # cuentas en US$ (efectivo, Zelle, USDT…)
+    # Reglas de clasificación propias del cliente (patrón, "C"/"D", naturaleza); van antes que las del banco.
+    reglas: list[tuple[str, str, str]] = field(default_factory=list)
 
 
 CLIENTES: dict[str, ConfigCliente] = {
@@ -71,6 +75,12 @@ CLIENTES: dict[str, ConfigCliente] = {
                            [("BANPLUS", r"PUNTO DE VENTAS"), ("PLAZA", r"PUNTO DE VENTAS")]),
         ],
     ),
+    "LA FANTASTICA": ConfigCliente(
+        nombre="IMPORTADORA Y COMERCIALIZADORA LA FANTASTICA, C.A.",
+        # Los créditos inmediatos a CASAMIA (cuenta propia en Mercantil) son traslados (Provincial, abr. 2026).
+        reglas=[(r"^CR\.I/OB\b.*\bCASAMIA\b", "D", S_TRASLADO),
+                (r"^CR\.I/.*\bCASAMIA\b", "C", E_TRASLADO)],
+    ),
     "SHIRO": ConfigCliente(
         nombre="SHIRO ALIMENTOS, C.A.",
         # Sin cierre de caja: las ventas del mes salen del Kardex (PDF) y se controlan contra el asiento mensual
@@ -85,7 +95,7 @@ CLIENTES: dict[str, ConfigCliente] = {
 
 def config_de(cliente: str) -> Optional[ConfigCliente]:
     """Busca la configuración por clave o por coincidencia en el nombre del cliente."""
-    c = cliente.upper()
+    c = "".join(ch for ch in unicodedata.normalize("NFD", cliente.upper()) if unicodedata.category(ch) != "Mn")
     for clave, cfg in CLIENTES.items():
         if clave in c or cfg.nombre.upper() in c:
             return cfg

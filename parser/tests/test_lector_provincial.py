@@ -37,11 +37,30 @@ def test_lee_y_cuadra():
 
 @SIN_PDF
 def test_resumen_por_item():
-    conv = convertir("LA FANTASTICA", "2026-04", [("Provincial 7817", "PROVINCIAL", PDF)])
+    conv = convertir("Importadora La Fantástica", "2026-04", [("Provincial 7817", "PROVINCIAL", PDF)])
     its = items(conv.cuentas[0].movs)
     tot = lambda nat: sum(i.creditos - i.debitos for i in its if i.naturaleza == nat)
     assert tot("Cobros POS – tarjeta de débito") == D("2053886.79")
     assert tot("Cobros POS – tarjeta de crédito") == D("164603.25")
-    assert tot("Comisiones bancarias") == D("-3482.65")
-    assert tot("Cargos bancarios (mantenimiento, estado de cuenta, SMS)") == D("-3537.60")
-    assert tot("Otros (sin clasificar)") == D("-12673.46")          # INV.PLATCO (domiciliación)
+    # comisiones: crédito inmediato 3.388,01 + transf. a terceros 94,64 + mantenimiento POS 3.521,60
+    # + INV.PLATCO 12.673,46 (comisión del punto de venta, por domiciliación)
+    assert tot("Comisiones bancarias") == D("-19677.71")
+    assert tot("Cargos bancarios (mantenimiento, estado de cuenta, SMS)") == D("-16.00")
+    assert tot("Traslados a cuentas propias") == D("-530000.00")     # CASAMIA (Mercantil): regla del cliente
+    assert tot("Otros (sin clasificar)") == 0
+    assert sum(i.creditos - i.debitos for i in its) == D("580713.07") - D("593371.48")
+
+
+@SIN_PDF
+def test_casamia_es_traslado_solo_para_la_fantastica():
+    conv = convertir("OTRO CLIENTE", "2026-04", [("Provincial", "PROVINCIAL", PDF)])
+    nat = {i.concepto: i.naturaleza for i in items(conv.cuentas[0].movs)}
+    assert nat["CR.I/OB CASAMIA MERCANTIL"] == "Pagos por transferencia / crédito inmediato"
+
+
+def test_platco_es_comision_pos_en_cualquier_banco():
+    from cvp_parser.modelo import Movimiento
+    from cvp_parser.naturaleza import S_COMISION, clasificar
+    for banco, desc in (("PROVINCIAL", "INV.PLATCO PNCCOB. DOMICIL."),
+                        ("MERCANTIL", "PAGO A LA EMPRESA INVERSIONES PLATCO")):
+        assert clasificar(banco, Movimiento(dt.date(2026, 4, 6), desc, debito=D("2725.84"))) == S_COMISION

@@ -70,7 +70,7 @@ export const BANCOS: { codigo: string; nombre: string; pendiente?: boolean }[] =
 ];
 
 /** Claves de configuración que existen en parser/cvp_parser/clientes.py. */
-export const CONFIGS_PARSER = ["WEI REST", "CACAO", "SHIRO"];
+export const CONFIGS_PARSER = ["WEI REST", "CACAO", "SHIRO", "LA FANTASTICA"];
 
 /** Nombres de las cuentas en divisas que reconoce el parser para cada configuración (clientes.py). */
 export const DIVISAS_PARSER: Record<string, string[]> = {

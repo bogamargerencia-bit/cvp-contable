@@ -67,10 +67,13 @@ class Conversion:
 
 def convertir(cliente: str, periodo: str, archivos: list[tuple[str, str, Path]]) -> Conversion:
     """archivos: [(nombre de la cuenta, banco, estado de cuenta), ...]. Admite varias cuentas del mismo banco."""
+    from .clientes import config_de
+    cfg = config_de(cliente)
+    reglas = cfg.reglas if cfg else []
     conv = Conversion(cliente, periodo)
     for nombre, banco, ruta in archivos:
         e = leer_estado(banco, Path(ruta), nombre)
-        conv.cuentas.append(CuentaConvertida(nombre, banco, e, cuadrar_extracto(e), clasificar_extracto(e)))
+        conv.cuentas.append(CuentaConvertida(nombre, banco, e, cuadrar_extracto(e), clasificar_extracto(e, reglas)))
     marcar_traslados([c.movs for c in conv.cuentas])
     return conv
 
