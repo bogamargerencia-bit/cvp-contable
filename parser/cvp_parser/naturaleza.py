@@ -120,6 +120,15 @@ REGLAS: dict[str, list[tuple[str, str, str]]] = {
         (r"^TRANS\.PROPIA", D, S_TRASLADO),
         (r"^N/D CRED I", D, S_TRANSF),
     ],
+    "PROVINCIAL": [
+        (r"^TD POS", C, E_POS_DEB),
+        (r"^TC POS", C, E_POS_CRE),
+        (r"^TRASP\.|^CR\.I/", C, E_TRANSF),
+        # mantenimiento de cuenta, emisión del estado y mantenimiento del punto de venta (como 100% Banco)
+        (r"^COM\.MTTO\.CTA|^COM\.EM\.EDO\.CTA|^COM MTTO POS", D, S_CARGOS),
+        (r"^COM TRF|^COMIS\.|^COM ", D, S_COMISION),          # transferencia a terceros, crédito inmediato
+        (r"^TRASP\.|^CR\.I/OB", D, S_TRANSF),
+    ],
     "MERCANTIL": [
         (r"^CANCELACION RESUMEN DE VENTAS", C, E_POS_LIQ),
         (r"^REINTEGRO COMISION|^DEVOLUCION CREDITO INMEDIATO", C, E_REVERSO),

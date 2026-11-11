@@ -8,6 +8,7 @@ from .venezolano import LectorVenezolano
 from .mercantil import LectorMercantil
 from .banesco import LectorBanesco
 from .activo import LectorActivo
+from .provincial import LectorProvincial
 
 LECTORES = {
     "100_BANCO": LectorBanco100(),
@@ -19,15 +20,17 @@ LECTORES = {
     "MERCANTIL": LectorMercantil(),
     "BANESCO": LectorBanesco(),
     "ACTIVO": LectorActivo(),
+    "PROVINCIAL": LectorProvincial(),
 }
 
 __all__ = ["LECTORES", "LectorBanco100", "LectorBNC", "LectorBanplus", "LectorPlaza", "LectorVenezolano",
-           "LectorBancamiga", "LectorMercantil", "LectorBanesco", "LectorActivo", "leer_estado"]
+           "LectorBancamiga", "LectorMercantil", "LectorBanesco", "LectorActivo", "LectorProvincial",
+           "leer_estado"]
 
 
 NOMBRES = {"100_BANCO": "100% Banco", "BNC": "BNC", "BANPLUS": "Banplus", "PLAZA": "Banco Plaza",
            "VENEZOLANO": "Venezolano de Crédito", "BANCAMIGA": "Bancamiga", "MERCANTIL": "Mercantil",
-           "BANESCO": "Banesco", "ACTIVO": "Banco Activo"}
+           "BANESCO": "Banesco", "ACTIVO": "Banco Activo", "PROVINCIAL": "BBVA Provincial"}
 
 
 def _reconocen(ruta) -> list[str]:
