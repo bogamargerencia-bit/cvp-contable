@@ -18,19 +18,45 @@ export interface Cliente {
   nombre_comercial: string | null;
   rif: string | null;
   clave_config: string | null;
-  config: { modo?: Modo } | null;
+  config: { modo?: Modo; catalogo?: CuentaCatalogo[] } | null;
   activo: boolean;
   creado_en: string;
 }
 
-/** Tipo de servicio: conciliación completa, o solo conversión de estados de cuenta a Excel. */
-export type Modo = "conciliacion" | "conversion";
+/** Tipo de servicio: conciliación completa, solo conversión de estados de cuenta a Excel, o clasificación por
+ * cuenta contable de un Excel de movimientos que envía el cliente (Delicateses). */
+export type Modo = "conciliacion" | "conversion" | "cuentas";
 export const MODOS: { valor: Modo; nombre: string; ayuda: string }[] = [
   { valor: "conciliacion", nombre: "Conciliación", ayuda: "Estados de cuenta + libro del sistema, caja y divisas." },
   { valor: "conversion", nombre: "Solo conversión a Excel", ayuda: "Solo estados de cuenta: Excel con resumen por ítem." },
+  { valor: "cuentas", nombre: "Clasificación por cuenta", ayuda: "Excel de movimientos del cliente: cada movimiento a su cuenta contable." },
 ];
 export const modoDe = (c: { config?: { modo?: string } | null }): Modo =>
-  c.config?.modo === "conversion" ? "conversion" : "conciliacion";
+  c.config?.modo === "conversion" ? "conversion" : c.config?.modo === "cuentas" ? "cuentas" : "conciliacion";
+
+/** Catálogo de cuentas del cliente (clientes.config.catalogo), para el modo «Clasificación por cuenta». */
+export interface CuentaCatalogo {
+  cuenta: string;
+  clasificacion: string;
+  grupo?: string;
+}
+
+/** Regla «descripción → cuenta» (public.reglas_clasificacion). */
+export interface ReglaClasificacion {
+  id: string;
+  cliente_id: string;
+  tipo: "exacta" | "empieza" | "contiene" | "regex";
+  patron: string;
+  cuenta: string | null;
+  clasificacion: string | null;
+  banco: string | null;
+  sentido: "ingreso" | "egreso" | null;
+  prioridad: number;
+  activa: boolean;
+  origen: "manual" | "carga_inicial" | "decision";
+  nota: string | null;
+  creada_en: string;
+}
 
 export interface Cuenta {
   id: string;

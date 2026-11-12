@@ -10,7 +10,10 @@ const txt = (f: FormData, k: string) => {
   const v = String(f.get(k) ?? "").trim();
   return v === "" ? null : v;
 };
-const modoForm = (f: FormData): Modo => (f.get("modo") === "conversion" ? "conversion" : "conciliacion");
+const modoForm = (f: FormData): Modo => {
+  const m = f.get("modo");
+  return m === "conversion" || m === "cuentas" ? m : "conciliacion";
+};
 
 function err(ruta: string, m: string): never {
   redirect(`${ruta}?error=${encodeURIComponent(m)}`);

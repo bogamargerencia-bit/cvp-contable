@@ -315,6 +315,123 @@ def _procesar_conversion(sb, corrida: dict, cliente: dict, periodo: dict, archiv
     })
 
 
+# ---------------------------------------------------------------- modo «Clasificación por cuenta» (Delicateses)
+def es_cuentas(cliente: dict) -> bool:
+    return (cliente.get("config") or {}).get("modo") == "cuentas"
+
+
+def _dec(v: Any) -> Optional[Decimal]:
+    """Saldo guardado como texto en periodos.saldos ('635917.59'); vacío = no informado."""
+    if v in (None, ""):
+        return None
+    try:
+        return Decimal(str(v).strip().replace(",", "."))
+    except Exception as ex:                        # noqa: BLE001
+        raise ErrorCorrida(f"Saldo no válido en el período: {v!r}") from ex
+
+
+def catalogo_de(cliente: dict):
+    from cvp_parser.clasificacion_cuentas import Cuenta
+    cat = (cliente.get("config") or {}).get("catalogo") or []
+    if not cat:
+        raise ErrorCorrida("El cliente no tiene catálogo de cuentas (configuración «catalogo»). "
+                           "Un administrador debe cargarlo.")
+    return [Cuenta(c["cuenta"], c["clasificacion"], c.get("grupo") or "OTRAS CUENTAS") for c in cat]
+
+
+def resumen_cuentas(res, archivo: str, avisos: list[str], max_pendientes: int = 1500) -> dict[str, Any]:
+    from cvp_parser.clasificacion_cuentas import (ASIGNADA, BS, CLIENTE, DIFERENCIA, EXCLUIDO, PENDIENTE, REGLA,
+                                                  SUGERIDO, claves, normalizar)
+    k = claves(res.filas)
+    grupo = {c.nombre: (c.clasificacion, c.grupo) for c in res.catalogo}
+    cuentas = []
+    for cta, fs in res.por_cuenta().items():
+        cl, gr = grupo.get(cta, ("", "FUERA DEL CATÁLOGO" if cta != "POR CLASIFICAR" else "POR CLASIFICAR"))
+        cuentas.append({"cuenta": cta, "clasificacion": cl, "grupo": gr, "movimientos": len(fs),
+                        "bs": str(sum((f.monto for f in fs if f.moneda == BS), Decimal("0.00"))),
+                        "usd": str(sum((f.usd or Decimal("0.00") for f in fs), Decimal("0.00")))})
+    orden = {c.nombre: i for i, c in enumerate(res.catalogo)}
+    cuentas.sort(key=lambda c: orden.get(c["cuenta"], 10_000))
+    pend = sorted(res.pendientes, key=lambda f: (f.estado != PENDIENTE, f.banco, f.fila))
+    cuadres = [{
+        "banco": c.banco, "moneda": c.moneda, "movimientos": len(c.validas), "excluidas": len(c.filas) - len(c.validas),
+        "creditos": str(c.creditos), "debitos": str(c.debitos), "saldo_inicial": _txt(c.saldo_inicial),
+        "saldo_calculado": _txt(c.saldo_calculado), "saldo_final": _txt(c.saldo_final_cliente),
+        "diferencia": _txt(c.diferencia), "dias_negativo": len(c.dias_en_negativo()),
+    } for c in res.cuadres]
+    control = {mon: [str(a), str(b)] for mon, (a, b) in res.control().items()}
+    no_cuadra = [c["banco"] for c in cuadres if c["diferencia"] not in (None, "0", "0.00") and Decimal(c["diferencia"])]
+    cuenta = lambda est: sum(1 for f in res.filas if f.estado == est and not (f.excluida and est != EXCLUIDO))
+    return {
+        "modo": "cuentas", "cliente": res.cliente, "periodo": res.periodo, "archivo": archivo,
+        "ok_general": not pend and not no_cuadra and all(a == b for a, b in control.values()),
+        "conteo": {"filas": len(res.filas), "regla": cuenta(REGLA) + cuenta(DIFERENCIA), "cliente": cuenta(CLIENTE),
+                   "asignadas": cuenta(ASIGNADA), "sugeridas": cuenta(SUGERIDO), "pendientes": cuenta(PENDIENTE),
+                   "excluidas": cuenta(EXCLUIDO)},
+        "cuentas": cuentas, "cuadres": cuadres, "control": control,
+        "pendientes": [{
+            "clave": k[f.fila], "fila": f.fila, "fecha": f.fecha.isoformat() if f.fecha else None, "banco": f.banco,
+            "descripcion": f.descripcion, "patron": normalizar(f.descripcion), "monto": str(f.monto),
+            "moneda": f.moneda, "estado": f.estado, "sugerida": f.cuenta, "criterio": f.criterio,
+        } for f in pend[:max_pendientes]],
+        "pendientes_total": len(pend),
+        "hallazgos": [{"banco": h.banco, "filas": h.filas, "tipo": h.tipo, "detalle": h.detalle, "accion": h.accion}
+                      for h in res.lectura.hallazgos],
+        # Campos que la web espera en toda corrida.
+        "bancos": [], "bancos_no_cuadran": no_cuadra, "situaciones": {}, "abiertas": len(pend), "resueltas": 0,
+        "alertas": [], "advertencias": avisos, "divisas": [],
+        "uso": {"bancos": [c["banco"] for c in cuadres], "divisas": [], "cierre_caja": False, "kardex": False,
+                "revision": False},
+    }
+
+
+def _procesar_cuentas(sb, corrida: dict, cliente: dict, periodo: dict, archivos: list[dict], paso, filtro) -> None:
+    from cvp_parser.clasificacion_cuentas import procesar, reglas_de_base
+    from cvp_parser.exportar_cuentas import excel_clasificacion
+    catalogo = catalogo_de(cliente)
+    movs = sorted((a for a in archivos if a["tipo"] == "movimientos_cliente"), key=lambda a: a["subido_en"])
+    if not movs:
+        raise ErrorCorrida("No se ha subido el Excel de movimientos del cliente en este período.")
+    a = movs[-1]
+    avisos = [f"Hay {len(movs)} Excel de movimientos vigentes; se usó el más reciente ({a['nombre_original']})."
+              ] if len(movs) > 1 else []
+    paso("Leyendo las reglas y decisiones del cliente", 10)
+    reglas = reglas_de_base(sb.select("reglas_clasificacion", cliente_id=f"eq.{cliente['id']}", activa="is.true",
+                                      select="*"))
+    asignadas = {r["clave"]: (r.get("cuenta"), bool(r.get("excluir")))
+                 for r in sb.select("asignaciones_cuenta", periodo_id=f"eq.{periodo['id']}", select="*")}
+    saldos = {str(b).upper(): (_dec((v or {}).get("inicial")), _dec((v or {}).get("final")))
+              for b, v in (periodo.get("saldos") or {}).items()}
+    clave = cliente.get("nombre_comercial") or cliente["nombre"]
+    per = f"{periodo['anio']}-{periodo['mes']:02d}"
+    with tempfile.TemporaryDirectory() as tmp:
+        carpeta = Path(tmp)
+        paso(f"Descargando {a['nombre_original']}", 20)
+        datos = sb.descargar(a["storage_path"])
+        if hashlib.sha256(datos).hexdigest() != a["sha256"]:
+            raise ErrorCorrida(f"El archivo «{a['nombre_original']}» no coincide con el que se subió "
+                               "(huella SHA-256 distinta). Vuelve a subirlo.")
+        ruta = carpeta / f"{a['id']}-{_seguro(a['nombre_original'])}"
+        ruta.write_bytes(datos)
+        paso(f"Clasificando con {len(reglas)} reglas", 45)
+        try:
+            res = procesar(clave, per, ruta, reglas, catalogo, saldos=saldos, asignadas=asignadas)
+        except (ValueError, KeyError) as ex:
+            raise ErrorCorrida(f"No se pudo leer el Excel del cliente: {ex}") from ex
+        paso("Generando el Excel", 75)
+        salida = carpeta / f"{_seguro(clave)}_{per}_clasificacion{corrida['numero']:02d}.xlsx"
+        excel_clasificacion(res, salida)
+        destino = f"{cliente['id']}/{periodo['id']}/corridas/{salida.name}"
+        paso("Guardando el Excel", 90)
+        sb.subir(destino, salida.read_bytes(), XLSX)
+    r = resumen_cuentas(res, a["nombre_original"], avisos)
+    sb.update("corridas", filtro, {
+        "estado": "lista", "etapa": "Terminada", "avance": 100, "ok_general": r["ok_general"], "resumen": r,
+        "excel_path": destino, "archivos": [a["id"]], "error": None,
+        "terminada_en": dt.datetime.now(dt.timezone.utc).isoformat(),
+    })
+
+
 # ---------------------------------------------------------------- orquestación con Supabase
 def procesar_corrida(sb, corrida_id: str) -> bool:
     """Ejecuta la corrida y deja el resultado (o el error) en la tabla corridas.
@@ -342,6 +459,9 @@ def procesar_corrida(sb, corrida_id: str) -> bool:
                              select="*,cuenta:cuentas(*)")
         if es_conversion(cliente):
             _procesar_conversion(sb, corrida, cliente, periodo, archivos, paso, filtro)
+            return True
+        if es_cuentas(cliente):
+            _procesar_cuentas(sb, corrida, cliente, periodo, archivos, paso, filtro)
             return True
         with tempfile.TemporaryDirectory() as tmp:
             carpeta = Path(tmp)

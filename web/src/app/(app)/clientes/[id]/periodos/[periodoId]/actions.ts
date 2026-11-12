@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { perfilActual } from "@/lib/sesion";
+import { montoEscrito } from "@/lib/montos";
 import { MINUTOS_EN_COLA } from "@/lib/tipos";
 import { crearClienteAdmin } from "@/lib/supabase/admin";
 import { crearClienteServidor } from "@/lib/supabase/server";
@@ -113,4 +114,32 @@ export async function cambiarEstadoPeriodo(f: FormData) {
   if (error) volver(r, "error", estado === "abierto" ? "Solo un administrador puede reabrir el período" : "No se pudo cerrar");
   revalidatePath(r);
   volver(r, "ok", estado === "cerrado" ? "Período cerrado" : "Período reabierto");
+}
+
+/**
+ * Saldos que informa el cliente por banco/caja (modo «Clasificación por cuenta»). Se guardan como texto exacto en
+ * periodos.saldos; los usa la próxima corrida para el cuadre. Campos: inicial__<BANCO> y final__<BANCO>.
+ */
+export async function guardarSaldos(f: FormData) {
+  await perfilActual();
+  const clienteId = String(f.get("cliente_id"));
+  const periodoId = String(f.get("periodo_id"));
+  const r = ruta(clienteId, periodoId);
+  const saldos: Record<string, { inicial: string | null; final: string | null }> = {};
+  try {
+    for (const [k, v] of f.entries()) {
+      const m = /^(inicial|final)__(.+)$/.exec(k);
+      if (!m) continue;
+      const banco = m[2].toUpperCase();
+      saldos[banco] ??= { inicial: null, final: null };
+      saldos[banco][m[1] as "inicial" | "final"] = montoEscrito(String(v));
+    }
+  } catch (e) {
+    volver(r, "error", e instanceof Error ? e.message : "Monto no válido");
+  }
+  const supabase = await crearClienteServidor();
+  const { error } = await supabase.from("periodos").update({ saldos }).eq("id", periodoId);
+  if (error) volver(r, "error", "No se pudieron guardar los saldos (¿período cerrado?)");
+  revalidatePath(r);
+  volver(r, "ok", "Saldos guardados: se usan en la próxima corrida");
 }

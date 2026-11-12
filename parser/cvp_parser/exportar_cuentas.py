@@ -24,8 +24,8 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-from .clasificacion_cuentas import (BS, CLIENTE, DIFERENCIA, EXCLUIDO, PENDIENTE, POR_CLASIFICAR, REGLA, SUGERIDO,
-                                    USD, Resultado)
+from .clasificacion_cuentas import (ASIGNADA, BS, CLIENTE, DIFERENCIA, EXCLUIDO, PENDIENTE, POR_CLASIFICAR, REGLA,
+                                    SUGERIDO, USD, Resultado)
 from .exportar import B, BLANCA, ENC, FECHA, NOTA, NUM, SUB, TIT, TOT, F, _fila
 
 AMARILLO = PatternFill("solid", start_color="FFF2CC")
@@ -196,11 +196,11 @@ def _hoja_resumen(ws, res: Resultado, rng, bancos: list[str], hojas_cuenta: dict
     r += 1
     sin_tasa = sum(1 for f in res.filas if not f.excluida and f.moneda == BS and not f.tasa)
     for nota in [
-        f"• Clasificación: {sum(1 for f in res.filas if f.estado in (REGLA, DIFERENCIA, CLIENTE))} por regla o del "
-        f"cliente, {sum(1 for f in res.filas if f.estado == SUGERIDO)} sugeridas por parecido (naranja) y "
+        f"• Clasificación: {sum(1 for f in res.filas if f.estado in (REGLA, DIFERENCIA, CLIENTE, ASIGNADA))} por "
+        f"regla, del cliente o del analista, {sum(1 for f in res.filas if f.estado == SUGERIDO)} sugeridas por parecido (naranja) y "
         f"{sum(1 for f in res.filas if f.estado == PENDIENTE and not f.excluida)} por clasificar (amarillo). "
         f"{sum(1 for f in res.filas if f.excluida)} filas excluidas (gris).",
-        "• CUENTA 2 marca el diferencial cambiario (alquiler y compra de divisas llevan tasa paralelo).",
+        "• CUENTA 2 (utilidad/pérdida por diferencial cambiario) la marca el cliente; su total por cuenta está en Hallazgos.",
         "• Las cajas en US$ (Efectivo, Zelle…) se suman en su moneda; no entran en «Monto Bs.» ni en «Monto $ (BCV)».",
     ] + ([f"• {sin_tasa} movimiento(s) en Bs. sin tasa BCV: no suman en las columnas de $."] if sin_tasa else []):
         ws.cell(r, 1, nota).font = NOTA

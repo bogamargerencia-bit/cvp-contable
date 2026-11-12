@@ -38,8 +38,9 @@ import openpyxl
 from .montos import CENTIMO, CERO, MontoInvalido, monto_excel
 
 # Estados de la clasificación de una fila
-CLIENTE, REGLA, DIFERENCIA, SUGERIDO, PENDIENTE, EXCLUIDO = (
-    "Viene del cliente", "Regla", "Diferencia a proveedor", "Sugerido (parecido)", "Por clasificar", "Excluido")
+CLIENTE, REGLA, DIFERENCIA, SUGERIDO, PENDIENTE, EXCLUIDO, ASIGNADA = (
+    "Viene del cliente", "Regla", "Diferencia a proveedor", "Sugerido (parecido)", "Por clasificar", "Excluido",
+    "Asignada por el analista")
 POR_CLASIFICAR = "POR CLASIFICAR"
 BS, USD = "Bs.", "US$"
 UMBRAL_PARECIDO = 0.88
@@ -455,7 +456,7 @@ def _aplicar(f: Fila, r: Regla, estado: str, criterio: str) -> None:
         f.estado = PENDIENTE
         f.criterio = r.nota or "Esta descripción se revisa siempre a mano"
         return
-    f.cuenta, f.cuenta2 = r.cuenta, r.cuenta2
+    f.cuenta = r.cuenta                 # CUENTA 2 (diferencial) la pone el cliente: no la cambia ninguna regla
 
 
 def aprender(filas: Iterable[Fila], ya: Sequence[Regla] = ()) -> list[Regla]:
@@ -576,6 +577,31 @@ class Resultado:
     def pendientes(self) -> list[Fila]:
         return [f for f in self.filas if not f.excluida and f.estado in (PENDIENTE, SUGERIDO)]
 
+    def cuenta2(self) -> list[tuple[str, str, int, Decimal]]:
+        """CUENTA 2 (diferencial cambiario, la pone el cliente): (cuenta, cuenta 2, movimientos, monto en Bs.)."""
+        g: dict[tuple[str, str], list] = defaultdict(lambda: [0, CERO])
+        for f in self.filas:
+            if f.cuenta2 and not f.excluida:
+                k = (f.cuenta or POR_CLASIFICAR, f.cuenta2)
+                g[k][0] += 1
+                g[k][1] += f.monto if f.moneda == BS else CERO
+        return [(c, c2, n, m) for (c, c2), (n, m) in sorted(g.items())]
+
+    def revisar_cuenta2(self) -> list[Hallazgo]:
+        """CUENTA 2 la pone el cliente; aquí solo se revisa: valores fuera de lo usual y su total por cuenta."""
+        out = []
+        raros = [f for f in self.filas if f.cuenta2 and not f.excluida and "DIFERENCIAL CAMBIARIO" not in
+                 _sin_acentos(f.cuenta2.upper())]
+        if raros:
+            out.append(Hallazgo(raros[0].banco, _rangos([f.fila for f in raros]), "Revisar",
+                                f"{len(raros)} fila(s) con CUENTA 2 distinta de utilidad/pérdida por diferencial "
+                                f"cambiario: {', '.join(sorted({f.cuenta2 for f in raros}))}.",
+                                "Confirmar con el cliente."))
+        for c, c2, n, m in self.cuenta2():
+            out.append(Hallazgo("—", "—", "CUENTA 2 (del cliente)", f"{c} · {c2}: {n} movimiento(s), Bs. {m}.",
+                                "Revisar que corresponda (lo marca el cliente)."))
+        return out
+
     def control(self) -> dict[str, tuple[Decimal, Decimal]]:
         """Por moneda: (suma de lo clasificado en cuentas + por clasificar, suma de los movimientos válidos).
         Deben ser iguales."""
@@ -587,9 +613,50 @@ class Resultado:
         return out
 
 
+def asignar(filas: Sequence[Fila], asignadas: dict[str, tuple[Optional[str], bool]], catalogo: Sequence[Cuenta]
+            ) -> list[str]:
+    """Aplica lo que el analista decidió a mano en la app (clave del movimiento → (cuenta, excluir)).
+    Devuelve las claves que ya no aparecen en el archivo (p. ej. porque el cliente lo corrigió)."""
+    k = claves(filas)
+    por_clave = {v: f for f in filas for c, v in [(f.fila, k[f.fila])]}
+    nombres = {c.nombre for c in catalogo}
+    for clave, (cuenta, excluir) in asignadas.items():
+        f = por_clave.get(clave)
+        if f is None:
+            continue
+        if excluir:
+            f.excluida, f.estado = True, EXCLUIDO
+            f.criterio = "Excluida por el analista" + (f" (antes: {f.cuenta})" if f.cuenta else "")
+        elif cuenta:
+            f.cuenta, f.estado, f.criterio = cuenta, ASIGNADA, "Asignada por el analista"
+            if cuenta not in nombres:
+                f.criterio += f" · OJO: la cuenta «{cuenta}» no está en el catálogo"
+    return [c for c in asignadas if c not in por_clave]
+
+
+def reglas_de_base(filas: Iterable[dict]) -> list[Regla]:
+    """Filas de public.reglas_clasificacion (activas) → reglas, en orden de prioridad."""
+    out = []
+    for r in sorted(filas, key=lambda r: (r.get("prioridad") or 100, r.get("creada_en") or "")):
+        tipo = {"exacta": "igual"}.get(r["tipo"], r["tipo"])
+        patron = r["patron"] if tipo == "regex" else normalizar(r["patron"])
+        signo = {"ingreso": "+", "egreso": "-"}.get(r.get("sentido") or "")
+        bancos = (r["banco"].strip().upper(),) if r.get("banco") else ()
+        out.append(Regla(tipo, patron, r.get("cuenta"), None, signo, r.get("nota") or "", bancos))
+    return out
+
+
 def procesar(cliente: str, periodo: str, ruta: Path, reglas: Sequence[Regla], catalogo: Sequence[Cuenta],
-             excluir: Iterable[int] = (), saldos: dict | None = None, hoja: Optional[str] = None) -> Resultado:
+             excluir: Iterable[int] = (), saldos: dict | None = None, hoja: Optional[str] = None,
+             asignadas: dict[str, tuple[Optional[str], bool]] | None = None) -> Resultado:
     anio, mes = (int(x) for x in periodo.split("-"))
     lect = leer_movimientos(ruta, hoja, (anio, mes))
     clasificar(lect.filas, reglas, catalogo, excluir)
-    return Resultado(cliente, periodo, lect, list(catalogo), cuadres(lect.filas, saldos))
+    perdidas = asignar(lect.filas, asignadas or {}, catalogo)
+    if perdidas:
+        lect.hallazgos.append(Hallazgo("—", "—", "Revisar",
+                                       f"{len(perdidas)} decisión(es) del analista ya no encuentran su movimiento "
+                                       "(el archivo cambió).", "Volver a clasificar esos movimientos en la app."))
+    res = Resultado(cliente, periodo, lect, list(catalogo), cuadres(lect.filas, saldos))
+    res.lectura.hallazgos.extend(res.revisar_cuenta2())
+    return res

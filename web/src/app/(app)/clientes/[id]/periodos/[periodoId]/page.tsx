@@ -9,7 +9,7 @@ import { perfilActual } from "@/lib/sesion";
 import { crearClienteServidor } from "@/lib/supabase/server";
 import { formatoVE } from "@/lib/montos";
 import { MESES, MINUTOS_EN_COLA, ahoraMs, modoDe, nombreBanco, type Cuenta } from "@/lib/tipos";
-import { cambiarEstadoPeriodo, procesar } from "./actions";
+import { cambiarEstadoPeriodo, guardarSaldos, procesar } from "./actions";
 
 // «Procesar» espera hasta 60 s a que el servicio de Railway despierte (plan serverless).
 export const maxDuration = 90;
@@ -27,9 +27,23 @@ type CuentaConvertida = {
   cuenta: string; banco: string; movimientos: number; saldo_anterior: string; debitos: string; creditos: string;
   saldo_final: string; cuadre: string; cuadra: boolean; mensajes: string[];
 };
-type Resumen = {
-  modo?: "conversion";
-  cuentas?: CuentaConvertida[];
+type CuadreCuentas = {
+  banco: string; moneda: string; movimientos: number; excluidas: number; creditos: string; debitos: string;
+  saldo_inicial: string | null; saldo_calculado: string | null; saldo_final: string | null; diferencia: string | null;
+  dias_negativo: number;
+};
+type ResumenCuentas = {
+  archivo: string;
+  conteo: { filas: number; regla: number; cliente: number; asignadas: number; sugeridas: number; pendientes: number; excluidas: number };
+  cuentas: { cuenta: string; clasificacion: string; grupo: string; movimientos: number; bs: string; usd: string }[];
+  cuadres: CuadreCuentas[];
+  control: Record<string, [string, string]>;
+  hallazgos: { banco: string; filas: string; tipo: string; detalle: string; accion: string }[];
+  pendientes_total: number;
+};
+type Resumen = Partial<ResumenCuentas> & {
+  modo?: "conversion" | "cuentas";
+  cuentas?: CuentaConvertida[] | ResumenCuentas["cuentas"];
   ok_general: boolean;
   abiertas: number;
   resueltas: number;
@@ -102,11 +116,20 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
   const divisas = cuentas.filter((c) => c.tipo === "divisa");
   // «Solo conversión»: basta el estado de cuenta; no hay libro, caja ni divisas.
   const conversion = modoDe(cliente) === "conversion";
+  // «Clasificación por cuenta»: un Excel de movimientos del cliente; sin estados de cuenta ni libro.
+  const porCuenta = modoDe(cliente) === "cuentas";
+  const movCliente = archivo("movimientos_cliente", null);
+  const saldos = (periodo.saldos ?? {}) as Record<string, { inicial: string | null; final: string | null }>;
+  const bancosSaldos = Array.from(new Set([
+    ...Object.keys(saldos),
+    ...((ultimaListaDe(corridas)?.resumen?.cuadres ?? []).map((c) => c.banco)),
+  ])).sort();
   const bancosListos = bancos.filter((c) => archivo("estado_cuenta", c.id) && (conversion || archivo("libro_sistema", c.id)));
   const bancosIncompletos = conversion ? [] : bancos.filter(
     (c) => (archivo("estado_cuenta", c.id) || archivo("libro_sistema", c.id)) && !bancosListos.includes(c),
   );
-  const puedeProcesar = !cerrado && !enCurso && bancosListos.length > 0 && bancosIncompletos.length === 0;
+  const puedeProcesar = porCuenta ? !cerrado && !enCurso && !!movCliente
+    : !cerrado && !enCurso && bancosListos.length > 0 && bancosIncompletos.length === 0;
 
   const base = { clienteId: id, periodoId, usuarioId: perfil.id, deshabilitado: cerrado };
   const fila = (etiqueta: string, tipo: string, cuentaId: string | null, ayuda?: string) => {
@@ -157,12 +180,52 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
         {/* ------------------------------------------------ archivos */}
         <section className="space-y-4 lg:col-span-2">
           <h2 className="subtitulo">Archivos del período</h2>
-          {cuentas.length === 0 && (
+          {porCuenta && (
+            <>
+              <div className="tarjeta px-4 py-2">
+                <p className="pt-1 text-xs font-medium uppercase tracking-wide text-tenue">Del cliente</p>
+                <div className="divide-y divide-linea/70">
+                  {fila("Excel de movimientos (hoja MOV BANCOS)", "movimientos_cliente", null,
+                    "El Excel que envía el cliente con los movimientos de todos sus bancos y cajas")}
+                </div>
+              </div>
+              <form action={guardarSaldos} className="tarjeta space-y-3 p-4">
+                <input type="hidden" name="cliente_id" value={id} />
+                <input type="hidden" name="periodo_id" value={periodoId} />
+                <p className="text-xs font-medium uppercase tracking-wide text-tenue">Saldos según el cliente</p>
+                {bancosSaldos.length === 0 ? (
+                  <p className="text-sm text-tenue">Procesa una vez para ver los bancos y cajas del archivo; luego carga aquí sus saldos.</p>
+                ) : (
+                  <table className="tabla">
+                    <thead><tr><th>Banco / caja</th><th>Inicial</th><th>Final</th></tr></thead>
+                    <tbody>
+                      {bancosSaldos.map((b) => (
+                        <tr key={b}>
+                          <td className="text-sm">{b}</td>
+                          <td><input name={`inicial__${b}`} defaultValue={saldos[b]?.inicial ? formatoVE(saldos[b].inicial) : ""}
+                            className="campo text-right" inputMode="decimal" placeholder="0,00" disabled={cerrado} /></td>
+                          <td><input name={`final__${b}`} defaultValue={saldos[b]?.final ? formatoVE(saldos[b].final) : ""}
+                            className="campo text-right" inputMode="decimal" placeholder="0,00" disabled={cerrado} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {bancosSaldos.length > 0 && !cerrado && (
+                  <div className="flex items-center gap-3">
+                    <BotonEnviar texto="Guardar saldos" enviando="Guardando…" />
+                    <span className="text-xs text-tenue">Se usan en la próxima corrida para el cuadre de cada banco.</span>
+                  </div>
+                )}
+              </form>
+            </>
+          )}
+          {!porCuenta && cuentas.length === 0 && (
             <p className="tarjeta p-4 text-sm text-tenue">
               El cliente no tiene cuentas. Un administrador debe agregarlas en la ficha del cliente.
             </p>
           )}
-          {bancos.map((c) => (
+          {!porCuenta && bancos.map((c) => (
             <div key={c.id} className="tarjeta px-4 py-2">
               <p className="pt-1 text-xs font-medium uppercase tracking-wide text-tenue">
                 {c.nombre} · {nombreBanco(c.banco)}
@@ -173,7 +236,7 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
               </div>
             </div>
           ))}
-          {!conversion && divisas.length > 0 && (
+          {!conversion && !porCuenta && divisas.length > 0 && (
             <div className="tarjeta px-4 py-2">
               <p className="pt-1 text-xs font-medium uppercase tracking-wide text-tenue">Cuentas en divisas (libro en US$)</p>
               <div className="divide-y divide-linea/70">
@@ -181,7 +244,7 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
               </div>
             </div>
           )}
-          {conversion ? (
+          {porCuenta ? null : conversion ? (
             <p className="text-xs text-tenue">
               Cliente de <span className="font-medium">solo conversión</span>: se convierten los estados de cuenta a Excel
               con un resumen por ítem, sin libro ni conciliación.
@@ -203,7 +266,12 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
           <h2 className="subtitulo">Procesar</h2>
           <div className="tarjeta p-4">
             <ul className="mb-4 space-y-1 text-sm">
-              {bancos.map((c) => {
+              {porCuenta && (
+                <li className={movCliente ? "" : "text-tenue"}>
+                  {movCliente ? "✓ Excel de movimientos del cliente" : "– Falta el Excel de movimientos del cliente"}
+                </li>
+              )}
+              {!porCuenta && bancos.map((c) => {
                 const listo = bancosListos.includes(c);
                 const parcial = bancosIncompletos.includes(c);
                 return (
@@ -221,6 +289,7 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
               <BotonEnviar texto="Procesar" enviando="Enviando…" deshabilitado={!puedeProcesar} />
               <span className="text-xs text-tenue">
                 {cerrado ? "Período cerrado." : enCurso ? "Hay una corrida en proceso…"
+                  : porCuenta ? (movCliente ? "Clasifica con las reglas del cliente y lo decidido en «Clasificar»." : "Sube el Excel del cliente.")
                   : bancosIncompletos.length ? "Completa o quita los archivos marcados con ✗."
                   : bancosListos.length === 0 ? (conversion ? "Sube al menos un estado de cuenta." : "Sube al menos un estado de cuenta con su libro.")
                   : "Usa los archivos vigentes de la izquierda."}
@@ -228,7 +297,20 @@ export default async function Periodo({ params, searchParams }: PageProps<"/clie
             </form>
           </div>
 
-          {ultimaLista && !conversion && (
+          {ultimaLista && porCuenta && (
+            <div className="tarjeta flex flex-wrap items-center justify-between gap-3 p-4">
+              <div className="text-sm">
+                <p className="font-medium">Clasificación de la corrida {ultimaLista.numero}</p>
+                <p className="text-tenue">
+                  {ultimaLista.ok_general ? "OK general: todo clasificado y los saldos cuadran."
+                    : `${ultimaLista.resumen?.pendientes_total ?? 0} movimientos por clasificar o confirmar.`}
+                </p>
+              </div>
+              <Link href={`/clientes/${id}/periodos/${periodoId}/clasificar`} className="boton">Clasificar</Link>
+            </div>
+          )}
+
+          {ultimaLista && !conversion && !porCuenta && (
             <div className="tarjeta flex flex-wrap items-center justify-between gap-3 p-4">
               <div className="text-sm">
                 <p className="font-medium">Revisión de la corrida {ultimaLista.numero}</p>
@@ -291,7 +373,8 @@ function TarjetaCorrida({ c, atascada }: { c: Corrida; atascada: boolean }) {
         </p>
       )}
       {r?.modo === "conversion" && <ResumenConversion r={r} />}
-      {r && r.modo !== "conversion" && (
+      {r?.modo === "cuentas" && <ResumenPorCuenta r={r as unknown as ResumenCuentas} />}
+      {r && r.modo !== "conversion" && r.modo !== "cuentas" && (
         <div className="mt-3 space-y-3 text-sm">
           <table className="tabla">
             <thead>
@@ -345,7 +428,7 @@ function TarjetaCorrida({ c, atascada }: { c: Corrida; atascada: boolean }) {
 
 /** Resultado de una corrida de «Solo conversión»: cuadre de cada estado de cuenta (montos como texto exacto). */
 function ResumenConversion({ r }: { r: Resumen }) {
-  const cuentas = r.cuentas ?? [];
+  const cuentas = (r.cuentas ?? []) as unknown as CuentaConvertida[];
   return (
     <div className="mt-3 space-y-3 text-sm">
       <div className="overflow-x-auto">
@@ -380,6 +463,66 @@ function ResumenConversion({ r }: { r: Resumen }) {
         </details>
       ) : null}
       <p className="text-xs text-tenue">El Excel trae una hoja por cuenta y el «Resumen por ítem» (naturaleza y concepto).</p>
+    </div>
+  );
+}
+
+function ultimaListaDe(corridas: Corrida[]) {
+  return corridas.find((c) => c.estado === "lista" && c.resumen?.modo === "cuentas");
+}
+
+/** Resultado de una corrida de «Clasificación por cuenta»: conteos, cuadre por banco y controles. */
+function ResumenPorCuenta({ r }: { r: ResumenCuentas }) {
+  const n = r.conteo;
+  const diferencia = (c: CuadreCuentas) =>
+    c.saldo_inicial == null ? "Falta saldo inicial" : c.saldo_final == null ? "Falta saldo final"
+      : c.diferencia && !/^-?0(\.0+)?$/.test(c.diferencia) ? `Diferencia ${formatoVE(c.diferencia)}` : "Cuadra";
+  const avisos = r.hallazgos.filter((h) => h.tipo !== "CUENTA 2 (del cliente)");
+  return (
+    <div className="mt-3 space-y-3 text-sm">
+      <p className="text-tenue">
+        {r.archivo}: {n.filas} movimientos · {n.regla + n.cliente + n.asignadas} clasificados
+        {n.sugeridas > 0 && ` · ${n.sugeridas} sugeridos (confirmar)`}
+        {n.pendientes > 0 && <span className="font-medium text-alerta"> · {n.pendientes} por clasificar</span>}
+        {n.excluidas > 0 && ` · ${n.excluidas} excluidos`}
+      </p>
+      <div className="overflow-x-auto">
+        <table className="tabla">
+          <thead>
+            <tr><th>Banco / caja</th><th className="text-right">Mov.</th><th className="text-right">Saldo inicial</th>
+              <th className="text-right">Saldo calculado</th><th className="text-right">Saldo del cliente</th><th>Cuadre</th></tr>
+          </thead>
+          <tbody>
+            {r.cuadres.map((c) => {
+              const d = diferencia(c);
+              return (
+                <tr key={c.banco}>
+                  <td>{c.banco}<span className="block text-xs text-tenue">{c.moneda}{c.excluidas ? ` · ${c.excluidas} excluidos` : ""}</span></td>
+                  <td className="text-right">{c.movimientos}</td>
+                  <td className="text-right whitespace-nowrap">{formatoVE(c.saldo_inicial)}</td>
+                  <td className="text-right whitespace-nowrap">{formatoVE(c.saldo_calculado)}</td>
+                  <td className="text-right whitespace-nowrap">{formatoVE(c.saldo_final)}</td>
+                  <td className={d === "Cuadra" ? "text-acento" : d.startsWith("Diferencia") ? "font-medium text-alerta" : "text-tenue"}>
+                    {d}{c.dias_negativo > 0 && <span className="block text-xs text-alerta">{c.dias_negativo} día(s) en negativo</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {Object.entries(r.control).some(([, [a, b]]) => a !== b) && (
+        <p className="msg-error">Control: lo clasificado no suma lo mismo que el archivo. Revisa el Excel.</p>
+      )}
+      {avisos.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-sm font-medium">Hallazgos ({avisos.length})</summary>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+            {avisos.map((h, i) => <li key={i}><span className="font-medium">{h.banco} · filas {h.filas}:</span> {h.detalle} {h.accion}</li>)}
+          </ul>
+        </details>
+      )}
+      <p className="text-xs text-tenue">El Excel trae el resumen por cuenta, los hallazgos, el cuadre de cada banco y una hoja por cuenta.</p>
     </div>
   );
 }

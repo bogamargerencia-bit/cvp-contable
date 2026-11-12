@@ -41,6 +41,7 @@ export default async function DetalleCliente({ params, searchParams }: PageProps
           <p className="mt-1 text-sm text-tenue">
             {c.nombre}{c.rif && ` · ${c.rif}`}{c.clave_config && ` · reglas ${c.clave_config}`}
             {modoDe(c) === "conversion" && <span className="insignia ml-2 bg-acento-suave text-acento">solo conversión</span>}
+            {modoDe(c) === "cuentas" && <span className="insignia ml-2 bg-acento-suave text-acento">clasificación por cuenta</span>}
             {!c.activo && " · inactivo"}
           </p>
         </div>
@@ -53,6 +54,18 @@ export default async function DetalleCliente({ params, searchParams }: PageProps
         )}
       </div>
       <Mensajes error={error} ok={ok} />
+
+      {modoDe(c) === "cuentas" && (
+        <div className="tarjeta mb-6 flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+          <p>
+            <span className="font-medium">Clasificación por cuenta.</span>{" "}
+            <span className="text-tenue">
+              {c.config?.catalogo?.length ?? 0} cuentas en el catálogo. Las reglas «descripción → cuenta» se usan en cada período.
+            </span>
+          </p>
+          <Link href={`/clientes/${c.id}/reglas`} className="boton-sec">Reglas de clasificación</Link>
+        </div>
+      )}
 
       {esAdmin && (
         <details className="tarjeta mb-6">

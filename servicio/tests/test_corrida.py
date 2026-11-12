@@ -19,7 +19,8 @@ class FakeSB:
 
     def __init__(self):
         self.t = {k: [] for k in ("clientes", "periodos", "cuentas", "archivos", "corridas", "partidas",
-                                  "decisiones", "correcciones_caja", "perfiles")}
+                                  "decisiones", "correcciones_caja", "perfiles", "reglas_clasificacion",
+                                  "asignaciones_cuenta")}
         self.storage: dict[str, bytes] = {}
 
     @staticmethod
@@ -348,3 +349,74 @@ def test_solo_conversion_sin_estados():
     r = sb.corrida(p, 1)
     procesar_corrida(sb, r["id"])
     assert r["estado"] == "error" and "ningún estado de cuenta" in r["error"]
+
+
+def _mov_cliente(ruta: Path) -> Path:
+    """Excel de movimientos ficticio con el formato de Delicateses (MOV BANCOS)."""
+    import datetime as dt
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "MOV BANCOS"
+    ws.append(["Fecha", "CUENTA", "CUENTA 2", "CLASIFICACIÓN", "Descripción", "Monto Bs.", "BCV DÓLAR", "Monto $.",
+               "BANCO", "BANCO"])
+    d = dt.datetime(2026, 8, 3)
+    for fila in [[d, None, None, None, "PAGO MOVIL", 1000.5, 100, None, None, "BANESCO"],
+                 [d, None, None, None, "COMISION BANCARIA", -2.5, 100, None, None, "BANESCO"],
+                 [d, None, None, None, "PROVEEDOR NUEVO", -300, 100, None, None, "BANESCO"],
+                 [d, None, None, None, "PAGO MOVIL", 20, 0, 20, None, "EFECTIVO"]]:
+        ws.append(fila)
+    wb.save(ruta)
+    return ruta
+
+
+def test_clasificacion_por_cuenta(tmp_path):
+    """Modo «cuentas»: reglas y catálogo de la base, asignación del analista, saldos del período."""
+    import io
+    import openpyxl
+    sb = FakeSB()
+    c, p = sb.cliente("DELI PRUEBA", None)
+    c["config"] = {"modo": "cuentas", "catalogo": [
+        {"cuenta": "VENTAS", "clasificacion": "VENTAS", "grupo": "INGRESOS"},
+        {"cuenta": "COMISION BANCARIA", "clasificacion": "GASTO", "grupo": "GASTOS"},
+        {"cuenta": "INVENTARIO", "clasificacion": "INVENTARIO", "grupo": "COMPRAS DE INVENTARIO"}]}
+    p["saldos"] = {"BANESCO": {"inicial": "500.00", "final": "1198.00"}}
+    sb.t["reglas_clasificacion"] += [
+        {"cliente_id": c["id"], "tipo": "empieza", "patron": "PAGO MOVIL", "cuenta": "VENTAS", "activa": True,
+         "prioridad": 20},
+        {"cliente_id": c["id"], "tipo": "empieza", "patron": "COMISION", "cuenta": "COMISION BANCARIA",
+         "activa": True, "prioridad": 10},
+        {"cliente_id": c["id"], "tipo": "exacta", "patron": "OTRA", "cuenta": "VENTAS", "activa": False}]
+    sb.archivo(p, _mov_cliente(tmp_path / "Movimientos_Agosto.xlsx"), "movimientos_cliente")
+    r = sb.corrida(p, 1)
+    procesar_corrida(sb, r["id"])
+    assert r["estado"] == "lista", r.get("error")
+    res = r["resumen"]
+    assert res["modo"] == "cuentas" and res["ok_general"] is False
+    assert res["conteo"]["pendientes"] == 1 and res["pendientes"][0]["patron"] == "PROVEEDOR NUEVO"
+    banesco = next(x for x in res["cuadres"] if x["banco"] == "BANESCO")
+    assert (banesco["saldo_calculado"], banesco["diferencia"]) == ("1198.00", "0.00")
+    assert res["control"]["Bs."][0] == res["control"]["Bs."][1] == "698.00"
+    # el analista asigna lo pendiente → segunda corrida con OK general
+    sb.t["asignaciones_cuenta"].append({"periodo_id": p["id"], "clave": res["pendientes"][0]["clave"],
+                                        "cuenta": "INVENTARIO", "excluir": False})
+    r2 = sb.corrida(p, 2)
+    procesar_corrida(sb, r2["id"])
+    assert r2["estado"] == "lista" and r2["ok_general"] is True, r2["resumen"]["pendientes"]
+    inv = next(x for x in r2["resumen"]["cuentas"] if x["cuenta"] == "INVENTARIO")
+    assert (inv["movimientos"], inv["bs"]) == (1, "-300.00")
+    wb = openpyxl.load_workbook(io.BytesIO(sb.storage[r2["excel_path"]]))
+    assert wb.sheetnames[:4] == ["Resumen", "Hallazgos", "Por clasificar", "MOV BANCOS"]
+
+
+def test_clasificacion_sin_catalogo_o_sin_archivo(tmp_path):
+    sb = FakeSB()
+    c, p = sb.cliente("X", None)
+    c["config"] = {"modo": "cuentas"}
+    r = sb.corrida(p, 1)
+    procesar_corrida(sb, r["id"])
+    assert r["estado"] == "error" and "catálogo" in r["error"]
+    c["config"]["catalogo"] = [{"cuenta": "VENTAS", "clasificacion": "VENTAS"}]
+    r = sb.corrida(p, 2)
+    procesar_corrida(sb, r["id"])
+    assert r["estado"] == "error" and "Excel de movimientos" in r["error"]

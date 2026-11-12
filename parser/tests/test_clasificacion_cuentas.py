@@ -51,7 +51,8 @@ def d(dia):
 def ruta(tmp_path):
     filas = [
         [d(1), None, None, None, "Pago Móvil", 1500.25, 100, None, None, "BANCO A"],
-        [d(1), None, None, None, "COMISION BANCARIA", -1.5, 100, None, None, "BANCO A"],
+        [d(1), None, "UTILIDAD POR DIFERENCIAL CAMBIARIO", None, "COMISION BANCARIA", -1.5, 100, None, None,
+         "BANCO A"],
         [d(2), None, None, None, "NOMINA JOSE 02092026", -800, 100, None, None, "BANCO A"],
         [d(2), None, None, None, "FRIGORIDICO MUNDIAL", -300, 100, None, None, "BANCO A"],       # tipeo
         [d(3), None, None, None, "DIF DISTRIBUIDORA ACME", -12.5, 100, None, None, "BANCO A"],
@@ -89,7 +90,7 @@ def test_clasificacion(ruta, tmp_path):
     assert f[3].cuenta == "COMISION BANCARIA" and f[4].cuenta == "NOMINA"
     assert (f[5].cuenta, f[5].estado) == ("INVENTARIO", SUGERIDO) and "FRIGORIFICO MUNDIAL" in f[5].criterio
     assert (f[6].cuenta, f[6].estado) == ("INVENTARIO", DIFERENCIA)
-    assert (f[7].cuenta, f[7].cuenta2) == ("ALQUILER", "PÉRDIDA POR DIFERENCIAL CAMBIARIO")
+    assert (f[7].cuenta, f[7].cuenta2) == ("ALQUILER", None)          # CUENTA 2 solo la pone el cliente
     assert (f[8].cuenta, f[8].estado) == (None, PENDIENTE)
     assert (f[9].cuenta, f[9].estado) == (None, PENDIENTE) and "a mano" in f[9].criterio
     assert (f[10].cuenta, f[10].estado) == ("INVENTARIO", CLIENTE)
@@ -108,6 +109,35 @@ def test_clasificacion(ruta, tmp_path):
             "VENTAS", "INVENTARIO", "Catálogo"} <= set(wb.sheetnames)
     mov = wb["MOV BANCOS"]
     assert mov.cell(2, 2).value == "VENTAS" and mov.cell(13, 13).value == "Sí"
+
+
+def test_asignaciones_y_cuenta2(ruta):
+    from cvp_parser.clasificacion_cuentas import ASIGNADA, claves
+    k = claves(leer_movimientos(ruta, periodo=(2026, 9)).filas)
+    res = procesar("PRUEBA", "2026-09", ruta, REGLAS, CAT,
+                   asignadas={k[8]: ("INVENTARIO", False), k[2]: (None, True), "NO|EXISTE#1": ("VENTAS", False)})
+    f = {x.fila: x for x in res.filas}
+    assert (f[8].cuenta, f[8].estado) == ("INVENTARIO", ASIGNADA)
+    assert f[2].excluida and f[2].estado == EXCLUIDO
+    assert f[3].cuenta2 == "UTILIDAD POR DIFERENCIAL CAMBIARIO"          # se respeta lo del cliente
+    hall = res.lectura.hallazgos
+    assert any("ya no encuentran su movimiento" in h.detalle for h in hall)
+    assert any(h.tipo == "CUENTA 2 (del cliente)" and "COMISION BANCARIA" in h.detalle for h in hall)
+
+
+def test_reglas_de_base():
+    from cvp_parser.clasificacion_cuentas import reglas_de_base
+    rs = reglas_de_base([
+        {"tipo": "empieza", "patron": "pago móvil", "cuenta": "VENTAS", "prioridad": 50, "sentido": "ingreso"},
+        {"tipo": "empieza", "patron": "Pago Movil Banesco", "cuenta": "TRASLADO ENTRE CUENTAS", "prioridad": 10},
+        {"tipo": "exacta", "patron": "Frigorífico  Mundial", "cuenta": "INVENTARIO", "banco": "banesco"},
+        {"tipo": "regex", "patron": r"^\s*COBR", "cuenta": "VENTAS"},
+        {"tipo": "empieza", "patron": "DEV CREDITO", "cuenta": None, "nota": "a mano"},
+    ])
+    assert [(r.tipo, r.patron) for r in rs][:3] == [("empieza", "PAGO MOVIL BANESCO"), ("empieza", "PAGO MOVIL"),
+                                                    ("igual", "FRIGORIFICO MUNDIAL")]
+    assert rs[1].signo == "+" and rs[2].bancos == ("BANESCO",) and rs[3].patron == r"^\s*COBR"
+    assert rs[4].cuenta is None
 
 
 def test_claves_estables(ruta):
